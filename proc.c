@@ -26,6 +26,25 @@ pinit(void)
   initlock(&ptable.lock, "ptable");
 }
 
+void updateProcRelatedTimers() {
+  struct proc *p;
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    switch(p->state){
+		case SLEEPING:
+		p->stime++;
+		break;
+		case RUNNABLE:
+		p->retime++;
+		break;
+		case RUNNING:
+		p->rutime++;
+		break;
+		default:
+		break;
+	}
+  }
+}
+
 //PAGEBREAK: 32
 // Look in the process table for an UNUSED proc.
 // If found, change state to EMBRYO and initialize
@@ -47,6 +66,11 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->ctime = ticks;
+  p->ttime = 0;
+  p->stime = 0;
+  p->retime = 0;
+  p->rutime = 0;
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -170,14 +194,17 @@ fork(void)
 // An exited process remains in the zombie state
 // until its parent calls wait() to find out it exited.
 void
-exit(void)
+exit(int status)
 {
   struct proc *p;
   int fd;
-
+  
   if(proc == initproc)
     panic("init exiting");
 
+  // set exit status
+  proc->exitStatus= status;
+	
   // Close all open files.
   for(fd = 0; fd < NOFILE; fd++){
     if(proc->ofile[fd]){
@@ -207,6 +234,7 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   proc->state = ZOMBIE;
+  proc->ttime = ticks;
   sched();
   panic("zombie exit");
 }
@@ -214,7 +242,67 @@ exit(void)
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
 int
-wait(void)
+wait(int *status)
+{
+  int a, b, c;
+  
+  return wait_stat(&a, &b, &c);
+}
+
+// Wait for a process with pid of 'pid' to exit and return its pid.
+int
+waitpid(int pid, int *status, int options)
+{
+  struct proc *p;
+  int pidExists;
+
+  acquire(&ptable.lock);
+  pidExists= 0;
+  for(;;){
+    // Scan through table looking for zombie processes.
+    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if (p->pid == pid){
+		pidExists= 1;
+		if (p->state == ZOMBIE){
+			// Found the proc.
+			if (status != 0){
+				*status= p->exitStatus;
+			}
+
+			kfree(p->kstack);
+			p->kstack = 0;
+			freevm(p->pgdir);
+			p->state = UNUSED;
+			p->pid = 0;
+			p->parent = 0;
+			p->name[0] = 0;
+			p->killed = 0;
+			p->exitStatus = 0;
+			p->ctime = 0;
+			p->ttime = 0;
+			p->stime = 0;
+			p->retime = 0;
+			p->rutime = 0;
+			release(&ptable.lock);
+			return pid;
+		}
+	  }
+    }
+
+	// if NONBLOCKING flag is on, do not wait for the process.
+    // No point waiting if we are killed.
+    if(!pidExists || status == NONBLOCKING || proc->killed){
+      release(&ptable.lock);
+      return -1;
+    }
+
+    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
+    sleep(proc, &ptable.lock);  //DOC: wait-sleep
+  }
+}
+
+int
+wait_stat(int *wtime, int *rtime, int *iotime)
 {
   struct proc *p;
   int havekids, pid;
@@ -229,6 +317,10 @@ wait(void)
       havekids = 1;
       if(p->state == ZOMBIE){
         // Found one.
+		*wtime= p->retime;
+		*rtime= p->rutime;
+		*iotime= p->stime;
+	
         pid = p->pid;
         kfree(p->kstack);
         p->kstack = 0;
@@ -238,6 +330,12 @@ wait(void)
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+		p->exitStatus = 0;
+		p->ctime = 0;
+		p->ttime = 0;
+		p->stime = 0;
+		p->retime = 0;
+		p->rutime = 0;
         release(&ptable.lock);
         return pid;
       }
@@ -461,5 +559,8 @@ procdump(void)
         cprintf(" %p", pc[i]);
     }
     cprintf("\n");
+	////////////////////////////////
+	cprintf("ctime %d; ttime %d; stime %d; retime %d; rutime %d\n", p->ctime, p->ttime, p->stime, p->retime, p->rutime);
+	////////////////////////////////
   }
 }

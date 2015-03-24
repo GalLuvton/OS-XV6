@@ -1,6 +1,9 @@
 // Segments in proc->gdt.
 #define NSEGS     7
 
+#define NONBLOCKING 0
+#define BLOCKING 1
+
 // Per-CPU state
 struct cpu {
   uchar id;                    // Local APIC ID; index into cpus[] below
@@ -18,6 +21,7 @@ struct cpu {
 
 extern struct cpu cpus[NCPU];
 extern int ncpu;
+extern void updateProcRelatedTimers(void);
 
 // Per-CPU variables, holding pointers to the
 // current cpu and to the current process.
@@ -63,6 +67,12 @@ struct proc {
   struct context *context;     // swtch() here to run process
   void *chan;                  // If non-zero, sleeping on chan
   int killed;                  // If non-zero, have been killed
+  int exitStatus;			   // Exit status
+  int ctime;				   // Creation time
+  int ttime;				   // Termination time
+  int stime;				   // Time spent in SLEEPING
+  int retime;				   // Time spent in RUNNABLE
+  int rutime;				   // Time spent in RUNNING
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)

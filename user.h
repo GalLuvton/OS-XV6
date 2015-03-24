@@ -3,8 +3,10 @@ struct rtcdate;
 
 // system calls
 int fork(void);
-int exit(void) __attribute__((noreturn));
-int wait(void);
+void exit(int) __attribute__((noreturn));
+int wait(int*);
+int waitpid(int, int*, int);
+int	wait_stat(int*, int*, int*);
 int pipe(int*);
 int write(int, void*, int);
 int read(int, void*, int);

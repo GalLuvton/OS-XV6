@@ -16,14 +16,59 @@ sys_fork(void)
 int
 sys_exit(void)
 {
-  exit();
-  return 0;  // not reached
+  int status;
+  
+  if(argint(0, &status) < 0)
+    return -1;
+  exit(status);
+  // never gets here
+  return -1;
 }
 
 int
 sys_wait(void)
 {
-  return wait();
+  int statusPh;
+  int *status;
+  
+  if(argint(0, &statusPh) < 0)
+    return -1;
+  status= (int*)statusPh;
+  return wait(status);
+}
+
+int
+sys_waitpid(void)
+{
+  int pid, options, statusPh;
+  int *status;
+
+  if(argint(0, &pid) < 0)
+    return -1;
+  if(argint(1, &statusPh) < 0)
+    return -1;
+  if(argint(2, &options) < 0)
+    return -1;
+  status= (int*)statusPh;
+  return waitpid(pid, status, options);
+}
+
+int
+sys_wait_stat(void)
+{
+  int wtimePh, rtimePh, iotimePh;
+  int *wtime, *rtime, *iotime;
+
+  if(argint(0, &wtimePh) < 0)
+    return -1;
+  if(argint(1, &rtimePh) < 0)
+    return -1;
+  if(argint(2, &iotimePh) < 0)
+    return -1;
+  wtime= (int*)wtimePh;
+  rtime= (int*)rtimePh;
+  iotime= (int*)iotimePh;
+  return wait_stat(wtime, rtime, iotime);
 }
 
 int

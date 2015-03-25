@@ -7,9 +7,25 @@
 #include "proc.h"
 #include "spinlock.h"
 
+// runtime variable to count how many times till QUANTA
+#if defined(_policy_FRR) || defined(_policy_DEFAULT)
+int runtime;
+#endif
+
+#if defined(_policy_FRR) || defined(_policy_FCFS)
+int pop();
+void push(int pid);
+#endif
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
+  #if defined(_policy_FRR) || defined(_policy_FCFS)
+    int fifoPIDQueue[NPROC];
+    int firstPos;		// first position containing a meaningful value
+	int lastPos;		// first position not containing a meaningful value
+	int lastAction; 	// states if the last action was a POP or PUSH
+  #endif 
 } ptable;
 
 static struct proc *initproc;
@@ -24,6 +40,11 @@ void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
+  #if defined(_policy_FRR) || defined(_policy_FCFS)
+	ptable.firstPos = -1;
+	ptable.lastPos = 0;
+	ptable.lastAction = POP;
+  #endif 
 }
 
 void updateProcRelatedTimers() {
@@ -124,6 +145,9 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
+  #if defined(_policy_FRR) || defined(_policy_FCFS)
+	push(p->pid);
+  #endif
 }
 
 // Grow current process's memory by n bytes.
@@ -185,6 +209,9 @@ fork(void)
   // lock to force the compiler to emit the np->state write last.
   acquire(&ptable.lock);
   np->state = RUNNABLE;
+  #if defined(_policy_FRR) || defined(_policy_FCFS)
+	push(pid);
+  #endif
   release(&ptable.lock);
   
   return pid;
@@ -244,9 +271,52 @@ exit(int status)
 int
 wait(int *status)
 {
-  int a, b, c;
-  
-  return wait_stat(&a, &b, &c);
+  struct proc *p;
+  int havekids, pid;
+
+  acquire(&ptable.lock);
+  for(;;){
+    // Scan through table looking for zombie children.
+    havekids = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent != proc)
+        continue;
+      havekids = 1;
+      if(p->state == ZOMBIE){
+        // Found one.
+		if (status){
+			*status= p->exitStatus;
+		}
+	
+        pid = p->pid;
+        kfree(p->kstack);
+        p->kstack = 0;
+        freevm(p->pgdir);
+        p->state = UNUSED;
+        p->pid = 0;
+        p->parent = 0;
+        p->name[0] = 0;
+        p->killed = 0;
+		p->exitStatus = 0;
+		p->ctime = 0;
+		p->ttime = 0;
+		p->stime = 0;
+		p->retime = 0;
+		p->rutime = 0;
+        release(&ptable.lock);
+        return pid;
+      }
+    }
+
+    // No point waiting if we don't have any children.
+    if(!havekids || proc->killed){
+      release(&ptable.lock);
+      return -1;
+    }
+
+    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
+    sleep(proc, &ptable.lock);  //DOC: wait-sleep
+  }
 }
 
 // Wait for a process with pid of 'pid' to exit and return its pid.
@@ -360,6 +430,8 @@ wait_stat(int *wtime, int *rtime, int *iotime)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+
+/* old one
 void
 scheduler(void)
 {
@@ -392,6 +464,71 @@ scheduler(void)
 
   }
 }
+*/
+
+void
+scheduler(void)
+{
+    struct proc *p;
+  #if defined(_policy_DEFAULT)
+    for(;;){
+        // Enable interrupts on this processor.
+        sti();
+        // Loop over process table looking for process to run.
+        acquire(&ptable.lock);
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        if(p->state != RUNNABLE)
+            continue;
+        // Switch to chosen process.  It is the process's job
+        // to release ptable.lock and then reacquire it
+        // before jumping back to us.
+        proc = p;
+        switchuvm(p);
+        p->state = RUNNING;
+        swtch(&cpu->scheduler, proc->context);
+        switchkvm();
+
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        proc = 0;
+        }
+        release(&ptable.lock);
+    }
+  #elif defined(_policy_FRR) || defined(_policy_FCFS)
+    for(;;){
+        // Enable interrupts on this processor.
+        sti();
+
+        acquire(&ptable.lock);
+		// Get the next process to run.
+		int nextProc;
+		nextProc = pop();
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+            // Check if pid is the current pid in the top of the queue
+            if(nextProc != p->pid){
+                continue;
+            }
+			if (p->state != RUNNABLE){
+				panic("process in queue is not RUNNABLE!");
+			}
+            // Switch to chosen process.  It is the process's job
+            // to release ptable.lock and then reacquire it
+            // before jumping back to us.
+            
+            proc = p;
+            switchuvm(p);
+            p->state = RUNNING;
+            swtch(&cpu->scheduler, proc->context);
+            switchkvm();
+            // Process is done running for now.
+            // It should have changed its p->state before coming back.
+            proc = 0;
+        }
+        release(&ptable.lock);
+    }
+  #endif
+}
+
 
 // Enter scheduler.  Must hold only ptable.lock
 // and have changed proc->state.
@@ -419,6 +556,12 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   proc->state = RUNNABLE;
+  #if defined(_policy_FRR) || defined(_policy_DEFAULT)
+	runtime = 0;
+  #endif
+  #if defined(_policy_FRR) || defined(_policy_FCFS)
+	push(proc->pid);
+  #endif
   sched();
   release(&ptable.lock);
 }
@@ -517,6 +660,9 @@ kill(int pid)
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING)
         p->state = RUNNABLE;
+		#if defined(_policy_FRR) || defined(_policy_FCFS)
+		  push(proc->pid);
+	    #endif
       release(&ptable.lock);
       return 0;
     }
@@ -564,3 +710,44 @@ procdump(void)
 	////////////////////////////////
   }
 }
+
+#if defined(_policy_FRR) || defined(_policy_FCFS)
+/*
+ * QUEUE MANIPULATION FUNCTIONS
+ */
+
+// pops the first item in queue, and return it
+int
+pop(void)
+{
+    int firstPid;
+
+	if ((ptable.firstPos == -1) || ((ptable.firstPos == ptable.lastPos) && (ptable.lastAction == POP))){
+		panic("proc.c:pop: nothing to pop!");
+	}
+	firstPid = ptable.fifoPIDQueue[ptable.firstPos];
+	ptable.firstPos++;
+	if (ptable.firstPos >= NPROC){
+		ptable.firstPos = 0;
+	}
+	ptable.lastAction = POP;
+	return firstPid;
+}
+
+// push the given PID to the queue
+void
+push(int pid)
+{
+	if ((ptable.firstPos == ptable.lastPos) && (ptable.lastAction == PUSH)){
+		panic("proc.c:push: queue is full!");
+	}
+    ptable.fifoPIDQueue[ptable.lastPos++] = pid;
+	if (ptable.firstPos == -1){
+		ptable.firstPos = 0;
+	}
+	if (ptable.lastPos >= NPROC){
+		ptable.lastPos = 0;
+	}
+	ptable.lastAction = PUSH;
+}
+#endif

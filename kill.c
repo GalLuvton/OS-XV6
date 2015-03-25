@@ -26,7 +26,7 @@ newKill(int argc, char **argv)
 		exit(1);
 	}
 	
-	pidtokill= (int)argv[1];
+	pidtokill= atoi(argv[1]);
 	kill(pidtokill);
 	
 	exit(0);

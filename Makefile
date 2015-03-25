@@ -168,6 +168,7 @@ UPROGS=\
 	_grep\
 	_init\
 	_kill\
+	_read\
 	_ln\
 	_ls\
 	_mkdir\
@@ -175,6 +176,7 @@ UPROGS=\
 	_sh\
 	_stressfs\
 	_usertests\
+	_playground\
 	_waitstattest\
 	_wc\
 	_zombie\

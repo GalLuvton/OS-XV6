@@ -25,10 +25,10 @@ struct {
   struct spinlock lock;
   struct proc proc[NPROC];
   #if defined(_policy_FRR) || defined(_policy_FCFS)
-    int fifoPIDQueue[NPROC];
-    int firstPos;		// first position containing a meaningful value
-	int lastPos;		// first position not containing a meaningful value
-	int lastAction; 	// states if the last action was a POP or PUSH
+    int  fifoPIDQueue[NPROC];
+    int  firstPos;		// first position containing a meaningful value
+	int  lastPos;		// first position not containing a meaningful value
+	int  isFull;		// states if the array is full
   #endif
 } ptable;
 
@@ -47,7 +47,7 @@ pinit(void)
   #if defined(_policy_FRR) || defined(_policy_FCFS)
 	ptable.firstPos = -1;
 	ptable.lastPos = 0;
-	ptable.lastAction = POP;
+	ptable.isFull = 0;
   #endif
 }
 
@@ -437,42 +437,6 @@ wait_stat(int *wtime, int *rtime, int *iotime)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
-
-/* old one
-void
-scheduler(void)
-{
-  struct proc *p;
-
-  for(;;){
-    // Enable interrupts on this processor.
-    sti();
-
-    // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
-
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
-      swtch(&cpu->scheduler, proc->context);
-      switchkvm();
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      proc = 0;
-    }
-    release(&ptable.lock);
-
-  }
-}
-*/
-
 void
 scheduler(void)
 {
@@ -484,20 +448,20 @@ scheduler(void)
         // Loop over process table looking for process to run.
         acquire(&ptable.lock);
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-        if(p->state != RUNNABLE)
-            continue;
-        // Switch to chosen process.  It is the process's job
-        // to release ptable.lock and then reacquire it
-        // before jumping back to us.
-        proc = p;
-        switchuvm(p);
-        p->state = RUNNING;
-        swtch(&cpu->scheduler, proc->context);
-        switchkvm();
+			if(p->state != RUNNABLE)
+				continue;
+			// Switch to chosen process.  It is the process's job
+			// to release ptable.lock and then reacquire it
+			// before jumping back to us.
+			proc = p;
+			switchuvm(p);
+			p->state = RUNNING;
+			swtch(&cpu->scheduler, proc->context);
+			switchkvm();
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        proc = 0;
+			// Process is done running for now.
+			// It should have changed its p->state before coming back.
+			proc = 0;
         }
         release(&ptable.lock);
     }
@@ -508,20 +472,21 @@ scheduler(void)
 
         acquire(&ptable.lock);
 		// Get the next process to run.
+
 		int nextProc;
+		
 		nextProc = pop();
-        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
             // Check if pid is the current pid in the top of the queue
-            if(nextProc != p->pid){
+			if(nextProc != p->pid)
                 continue;
-            }
+			
 			if (p->state != RUNNABLE){
 				panic("process in queue is not RUNNABLE!");
 			}
             // Switch to chosen process.  It is the process's job
             // to release ptable.lock and then reacquire it
             // before jumping back to us.
-            
             proc = p;
             switchuvm(p);
             p->state = RUNNING;
@@ -534,36 +499,41 @@ scheduler(void)
         release(&ptable.lock);
     }
   #elif defined(_policy_CFS)
+	struct proc *nextProc = 0;
     for(;;){
         // Enable interrupts on this processor.
         sti();
 
         acquire(&ptable.lock);
 		// Get the next process to run.
-		struct proc *nextProc = 0;
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-            // Check if pid is the current pid in the top of the queue
+			if(p->state != RUNNABLE)
+				continue;
+				
             if (nextProc == 0){
 				nextProc = p;
-			} else {
+			}
+			else {
 				if ((p->rutime * p->priority) < (nextProc->rutime * nextProc->priority)){
 					nextProc = p;
 				}
 			}
         }
-		// Switch to chosen process.  It is the process's job
-		// to release ptable.lock and then reacquire it
-		// before jumping back to us.
-		
-		proc = nextProc;
-		switchuvm(p);
-		p->state = RUNNING;
-		swtch(&cpu->scheduler, proc->context);
-		switchkvm();
-		// Process is done running for now.
-		// It should have changed its p->state before coming back.
-		proc = 0;
-        release(&ptable.lock);
+		if (nextProc){
+			// Switch to chosen process.  It is the process's job
+			// to release ptable.lock and then reacquire it
+			// before jumping back to us.
+			proc = nextProc;
+			switchuvm(nextProc);
+			nextProc->state = RUNNING;
+			swtch(&cpu->scheduler, proc->context);
+			switchkvm();
+			// Process is done running for now.
+			// It should have changed its p->state before coming back.
+			proc = 0;
+			nextProc = 0;
+		}
+		release(&ptable.lock);
     }
   #endif
 }
@@ -670,9 +640,14 @@ wakeup1(void *chan)
 {
   struct proc *p;
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state == SLEEPING && p->chan == chan){
       p->state = RUNNABLE;
+	  #if defined(_policy_FRR) || defined(_policy_FCFS)
+		push(p->pid);
+	  #endif
+	}
+  }
 }
 
 // Wake up all processes sleeping on chan.
@@ -700,7 +675,7 @@ kill(int pid)
       if(p->state == SLEEPING)
         p->state = RUNNABLE;
 		#if defined(_policy_FRR) || defined(_policy_FCFS)
-		  push(proc->pid);
+		  push(p->pid);
 	    #endif
       release(&ptable.lock);
       return 0;
@@ -760,16 +735,20 @@ int
 pop(void)
 {
     int firstPid;
-
-	if ((ptable.firstPos == -1) || ((ptable.firstPos == ptable.lastPos) && (ptable.lastAction == POP))){
-		panic("proc.c:pop: nothing to pop!");
+	
+	if ((ptable.firstPos == ptable.lastPos) && !ptable.isFull){
+		//panic("proc.c:pop: nothing to pop!");
+		return -1;
 	}
 	firstPid = ptable.fifoPIDQueue[ptable.firstPos];
 	ptable.firstPos++;
 	if (ptable.firstPos >= NPROC){
 		ptable.firstPos = 0;
 	}
-	ptable.lastAction = POP;
+	if (ptable.isFull != 0){
+		ptable.isFull = 0;
+	}
+	
 	return firstPid;
 }
 
@@ -777,17 +756,20 @@ pop(void)
 void
 push(int pid)
 {
-	if ((ptable.firstPos == ptable.lastPos) && (ptable.lastAction == PUSH)){
+	if (ptable.isFull){
 		panic("proc.c:push: queue is full!");
 	}
-    ptable.fifoPIDQueue[ptable.lastPos++] = pid;
 	if (ptable.firstPos == -1){
 		ptable.firstPos = 0;
 	}
+    ptable.fifoPIDQueue[ptable.lastPos] = pid;
+	ptable.lastPos++;
 	if (ptable.lastPos >= NPROC){
 		ptable.lastPos = 0;
 	}
-	ptable.lastAction = PUSH;
+	if (ptable.firstPos == ptable.lastPos){
+		ptable.isFull = 1;
+	}
 }
 #endif
 

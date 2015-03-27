@@ -15,7 +15,7 @@ struct spinlock tickslock;
 uint ticks;
 
 // runtime variable to count how many times till QUANTA
-#if defined(_policy_FRR) || defined(_policy_DEFAULT) || defined(_policy_CFS)
+#if defined(_policy_DEFAULT) || defined(_policy_FRR) || defined(_policy_CFS)
 extern int runtime;
 #endif
 

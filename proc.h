@@ -1,9 +1,12 @@
 // Segments in proc->gdt.
-#define NSEGS       7
-#define NONBLOCKING 0
-#define BLOCKING    1
-#define POP         0
-#define PUSH        1
+#define NSEGS         7
+#define NONBLOCKING   0
+#define BLOCKING      1
+#define POP           0
+#define PUSH          1
+#define HIGH          1
+#define MEDIUM        1
+#define LOW           1
 
 // Per-CPU state
 struct cpu {
@@ -76,6 +79,9 @@ struct proc {
   int rutime;				   // Time spent in RUNNING
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
+  #if defined(_policy_CFS)
+  int priority;
+  #endif
   char name[16];               // Process name (debugging)
 };
 

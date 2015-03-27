@@ -100,6 +100,9 @@ extern int sys_waitpid(void);
 extern int sys_wait_stat(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
+#if defined(_policy_CFS)
+extern int sys_set_priority(void);
+#endif
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    	sys_fork,
@@ -125,6 +128,9 @@ static int (*syscalls[])(void) = {
 [SYS_link]    	sys_link,
 [SYS_mkdir]   	sys_mkdir,
 [SYS_close]   	sys_close,
+#if defined(_policy_CFS)
+[SYS_set_priority] sys_set_priority,
+#endif
 };
 
 void

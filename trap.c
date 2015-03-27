@@ -15,7 +15,7 @@ struct spinlock tickslock;
 uint ticks;
 
 // runtime variable to count how many times till QUANTA
-#if defined(_policy_FRR) || defined(_policy_DEFAULT)
+#if defined(_policy_FRR) || defined(_policy_DEFAULT) || defined(_policy_CFS)
 extern int runtime;
 #endif
 
@@ -111,13 +111,10 @@ trap(struct trapframe *tf)
   if(proc && proc->killed && (tf->cs&3) == DPL_USER)
     exit(0);
 
-#if defined(_policy_DEFAULT)
+#if defined(_policy_DEFAULT) || defined(_policy_FRR) || defined(_policy_CFS)
   // NORMAL EXECUTION
   // Force process to give up CPU on clock tick.
   // If interrupts were on while locks held, would need to check nlock.
-  if(proc && (proc->state == RUNNING) && (tf->trapno == T_IRQ0+IRQ_TIMER))
-    yield();
-#elif defined(_policy_FRR)
   // ONLY if we passed the quanta
   if(proc && (proc->state == RUNNING) && (tf->trapno == T_IRQ0+IRQ_TIMER) && (runtime == QUANTA)){
 	yield();

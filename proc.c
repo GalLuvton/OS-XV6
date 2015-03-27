@@ -8,13 +8,17 @@
 #include "spinlock.h"
 
 // runtime variable to count how many times till QUANTA
-#if defined(_policy_FRR) || defined(_policy_DEFAULT)
+#if defined(_policy_FRR) || defined(_policy_DEFAULT) || defined(_policy_CFS)
 int runtime;
 #endif
 
 #if defined(_policy_FRR) || defined(_policy_FCFS)
-int pop();
+int  pop();
 void push(int pid);
+#endif
+
+#if defined(_policy_CFS)
+int set_priority(int priority);
 #endif
 
 struct {
@@ -25,7 +29,7 @@ struct {
     int firstPos;		// first position containing a meaningful value
 	int lastPos;		// first position not containing a meaningful value
 	int lastAction; 	// states if the last action was a POP or PUSH
-  #endif 
+  #endif
 } ptable;
 
 static struct proc *initproc;
@@ -44,7 +48,7 @@ pinit(void)
 	ptable.firstPos = -1;
 	ptable.lastPos = 0;
 	ptable.lastAction = POP;
-  #endif 
+  #endif
 }
 
 void updateProcRelatedTimers() {
@@ -92,6 +96,9 @@ found:
   p->stime = 0;
   p->retime = 0;
   p->rutime = 0;
+  #if defined(_policy_CFS)
+  p->priority = MEDIUM;
+  #endif
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -526,6 +533,38 @@ scheduler(void)
         }
         release(&ptable.lock);
     }
+  #elif defined(_policy_CFS)
+    for(;;){
+        // Enable interrupts on this processor.
+        sti();
+
+        acquire(&ptable.lock);
+		// Get the next process to run.
+		struct proc *nextProc = 0;
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+            // Check if pid is the current pid in the top of the queue
+            if (nextProc == 0){
+				nextProc = p;
+			} else {
+				if ((p->rutime * p->priority) < (nextProc->rutime * nextProc->priority)){
+					nextProc = p;
+				}
+			}
+        }
+		// Switch to chosen process.  It is the process's job
+		// to release ptable.lock and then reacquire it
+		// before jumping back to us.
+		
+		proc = nextProc;
+		switchuvm(p);
+		p->state = RUNNING;
+		swtch(&cpu->scheduler, proc->context);
+		switchkvm();
+		// Process is done running for now.
+		// It should have changed its p->state before coming back.
+		proc = 0;
+        release(&ptable.lock);
+    }
   #endif
 }
 
@@ -749,5 +788,16 @@ push(int pid)
 		ptable.lastPos = 0;
 	}
 	ptable.lastAction = PUSH;
+}
+#endif
+
+#if defined(_policy_CFS)
+int
+set_priority(int priority)
+{
+	acquire(&ptable.lock);
+	proc->priority = priority;
+	release(&ptable.lock);
+	return 0;
 }
 #endif

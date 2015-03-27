@@ -118,6 +118,9 @@ void            userinit(void);
 int             wait(int *status);
 int				waitpid(int pid, int *status, int options);
 int				wait_stat(int *wtime, int *rtime, int *iotime);
+#if defined(_policy_CFS)
+int				set_priority(int priority);
+#endif
 void            wakeup(void*);
 void            yield(void);
 

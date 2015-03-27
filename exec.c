@@ -7,11 +7,14 @@
 #include "x86.h"
 #include "elf.h"
 
+extern void forcedexit_start(void);
+extern void forcedexit_end(void);
+
 int
 exec(char *path, char **argv)
 {
   char *s, *last;
-  int i, off;
+  int i, off, startOfForcedexit;
   uint argc, sz, sp, ustack[3+MAXARG+1];
   struct elfhdr elf;
   struct inode *ip;
@@ -53,6 +56,14 @@ exec(char *path, char **argv)
   end_op();
   ip = 0;
 
+  // copy over a call for forcedexit, so that every process will end with exit()
+  // this part copies the actual code of forcedexit to the userspace of the code we execute
+  startOfForcedexit = sz;
+  if(copyout(pgdir, sz, forcedexit_start, (int)(forcedexit_end - forcedexit_start)) < 0)
+      goto bad;
+  sz -= (int)(forcedexit_end - forcedexit_start);
+
+  
   // Allocate two pages at the next page boundary.
   // Make the first inaccessible.  Use the second as the user stack.
   sz = PGROUNDUP(sz);
@@ -72,7 +83,7 @@ exec(char *path, char **argv)
   }
   ustack[3+argc] = 0;
 
-  ustack[0] = 0xffffffff;  // fake return PC
+  ustack[0] = startOfForcedexit;  // return to forced exit
   ustack[1] = argc;
   ustack[2] = sp - (argc+1)*4;  // argv pointer
 

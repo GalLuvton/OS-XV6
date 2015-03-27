@@ -14,6 +14,13 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
+// runtime variable to count how many times till QUANTA
+#if defined(_policy_FRR) || defined(_policy_DEFAULT)
+extern int runtime;
+#endif
+
+extern void procTimeUpdate();
+
 void
 tvinit(void)
 {
@@ -51,6 +58,9 @@ trap(struct trapframe *tf)
     if(cpu->id == 0){
       acquire(&tickslock);
       ticks++;
+	  #if defined(_policy_FRR)
+        runtime = (runtime+1)%(QUANTA+1);
+      #endif
 	  updateProcRelatedTimers();
       wakeup(&ticks);
       release(&tickslock);
@@ -101,10 +111,18 @@ trap(struct trapframe *tf)
   if(proc && proc->killed && (tf->cs&3) == DPL_USER)
     exit(0);
 
+#if defined(_policy_DEFAULT)
+  // NORMAL EXECUTION
   // Force process to give up CPU on clock tick.
   // If interrupts were on while locks held, would need to check nlock.
-  if(proc && proc->state == RUNNING && tf->trapno == T_IRQ0+IRQ_TIMER)
+  if(proc && (proc->state == RUNNING) && (tf->trapno == T_IRQ0+IRQ_TIMER))
     yield();
+#elif defined(_policy_FRR)
+  // ONLY if we passed the quanta
+  if(proc && (proc->state == RUNNING) && (tf->trapno == T_IRQ0+IRQ_TIMER) && (runtime == QUANTA)){
+	yield();
+  }
+#endif
 
   // Check if the process has been killed since we yielded
   if(proc && proc->killed && (tf->cs&3) == DPL_USER)

@@ -1,8 +1,9 @@
 // Segments in proc->gdt.
-#define NSEGS     7
-
+#define NSEGS       7
 #define NONBLOCKING 0
-#define BLOCKING 1
+#define BLOCKING    1
+#define POP         0
+#define PUSH        1
 
 // Per-CPU state
 struct cpu {

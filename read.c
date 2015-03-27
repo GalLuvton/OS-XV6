@@ -13,6 +13,9 @@ main(void)
 	buffer[1]= 0;
 	for (;;){
 		read(0, buffer, 1);
+		if (buffer[0] == 'q'){
+			exit(0);
+		}
 		printf(1, buffer);
 	}
 	exit(0);

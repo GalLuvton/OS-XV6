@@ -176,7 +176,6 @@ UPROGS=\
 	_rm\
 	_sh\
 	_stressfs\
-	_usertests\
 	_playground\
 	_waitstattest\
 	_wc\

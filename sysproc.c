@@ -57,8 +57,8 @@ sys_waitpid(void)
 int
 sys_wait_stat(void)
 {
-  int wtimePh, rtimePh, iotimePh;
-  int *wtime, *rtime, *iotime;
+  int wtimePh, rtimePh, iotimePh, statusPh;
+  int *wtime, *rtime, *iotime, *status;
 
   if(argint(0, &wtimePh) < 0)
     return -1;
@@ -66,10 +66,30 @@ sys_wait_stat(void)
     return -1;
   if(argint(2, &iotimePh) < 0)
     return -1;
+  if(argint(3, &statusPh) < 0)
+    return -1;
   wtime= (int*)wtimePh;
   rtime= (int*)rtimePh;
   iotime= (int*)iotimePh;
-  return wait_stat(wtime, rtime, iotime);
+  status= (int*)statusPh;
+  return wait_stat(wtime, rtime, iotime, status);
+}
+
+int
+sys_wait_jobid(void)
+{
+  int jobid;
+  
+  if(argint(0, &jobid) < 0)
+    return -1;
+  return wait_jobid(jobid);
+}
+
+int
+sys_top(void)
+{
+	top();
+	return 0;
 }
 
 int
@@ -148,3 +168,24 @@ sys_set_priority(void)
   return set_priority(priority);
 }
 #endif
+
+int
+sys_set_jobID(void)
+{
+  return set_jobID();
+}
+
+int
+sys_print_jobID(void)
+{
+  int commandPh;
+  int jobid;
+  char *command;
+
+  if(argint(0, &jobid) < 0)
+    return -1;
+  if(argint(1, &commandPh) < 0)
+    return -1;
+  command= (char*)commandPh;
+  return print_jobID(jobid, command);
+}

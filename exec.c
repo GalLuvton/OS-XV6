@@ -61,7 +61,7 @@ exec(char *path, char **argv)
   startOfForcedexit = sz;
   if(copyout(pgdir, sz, forcedexit_start, (int)(forcedexit_end - forcedexit_start)) < 0)
       goto bad;
-  sz -= (int)(forcedexit_end - forcedexit_start);
+  sz += (int)(forcedexit_end - forcedexit_start);
 
   
   // Allocate two pages at the next page boundary.

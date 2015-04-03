@@ -105,7 +105,7 @@ int             pipewrite(struct pipe*, char*, int);
 //PAGEBREAK: 16
 // proc.c
 struct proc*    copyproc(struct proc*);
-void            exit(int status);
+void            exit(int);
 int             fork(void);
 int             growproc(int);
 int             kill(int);
@@ -115,12 +115,16 @@ void            scheduler(void) __attribute__((noreturn));
 void            sched(void);
 void            sleep(void*, struct spinlock*);
 void            userinit(void);
-int             wait(int *status);
-int				waitpid(int pid, int *status, int options);
-int				wait_stat(int *wtime, int *rtime, int *iotime);
+int             wait(int*);
+int				waitpid(int, int*, int);
+int				wait_stat(int*, int*, int*, int*);
+int				wait_jobid(int);
 #if defined(_policy_CFS)
-int				set_priority(int priority);
+int				set_priority(int);
 #endif
+int				set_jobID(void);
+void			top(void);
+int				print_jobID(int, char*);
 void            wakeup(void*);
 void            yield(void);
 

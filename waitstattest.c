@@ -37,7 +37,7 @@ wait_test(void)
 	int i;
 	printf(1, "wait test\n");
 
-	for (i=0; i<100; i++){
+	for (i=0; i<50; i++){
 		foo(i);
 		wait(&status);
 		printf(1, "status: %d \n",status);
@@ -48,14 +48,14 @@ void
 waitpid_nonblock_test(void)
 {
 	int options = NONBLOCKING;
-	int status;
+	int status = -1;
 	int pid;
 	int i;
 	printf(1, "waitpid test\n");
-    for (i=0; i<100; i++){
+    for (i=0; i<50; i++){
 		pid = foo(i);
 		waitpid(pid,&status,options);
-		printf(1, "status: %d; options: %d \n",status,options);
+		printf(1, "turn %d :: status: %d; options: %d \n",i,status,options);
 	}
 }
 
@@ -68,7 +68,7 @@ waitpid_block_test(void)
 	int i;
 	printf(1, "waitpid test\n");
 
-    for (i=0; i<100; i++){
+    for (i=0; i<50; i++){
 		pid = foo(i);
 		waitpid(pid,&status,options);
 		printf(1, "status: %d; options: %d \n",status,options);
@@ -81,13 +81,14 @@ wait_stat_test(void)
 	int wTime;
 	int rTime;
 	int ioTime;
+	int status;
 	int i;
 	printf(1, "wait_stat test\n");
 
-    for (i=0; i<100; i++){
+    for (i=0; i<50; i++){
 		foo(i);
-		wait_stat(&wTime,&rTime,&ioTime);
-		printf(1, "runnable time: %d; running time: %d; sleeping time: %d \n",wTime,rTime, ioTime);
+		wait_stat(&wTime,&rTime,&ioTime,&status);
+		printf(1, "runnable time: %d; running time: %d; sleeping time: %d; status %d \n",wTime,rTime, ioTime, status);
 	}
 }
 
@@ -98,7 +99,7 @@ main(void)
 	char buffer[10];
 	
 	for (;;){
-		printf(1, "input please\n");
+		printf(1, "1: wait; 2: waitpid noblock; 3: waitpid block; 4: wait_stat\n");
 		read(0, buffer, 10);
 		i = buffer[0]-'0';
 		switch (i){

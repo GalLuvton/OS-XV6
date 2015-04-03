@@ -21,6 +21,12 @@ void push(int pid);
 int set_priority(int priority);
 #endif
 
+static const char* S_EMBRYO = "Embryo";
+static const char* S_SLEEPING = "Sleeping";
+static const char* S_RUNNABLE = "Runnable";
+static const char* S_RUNNING = "Running";
+static const char* S_ZOMBIE = "Zombie";
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -91,11 +97,14 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->exitStatus = 0;
+  p->killed = 0;
   p->ctime = ticks;
   p->ttime = 0;
   p->stime = 0;
   p->retime = 0;
   p->rutime = 0;
+  p->jobID = 0;
   #if defined(_policy_CFS)
   p->priority = MEDIUM;
   #endif
@@ -150,6 +159,7 @@ userinit(void)
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
+  p->jobID = 0;
 
   p->state = RUNNABLE;
   #if defined(_policy_FRR) || defined(_policy_FCFS)
@@ -212,7 +222,18 @@ fork(void)
   safestrcpy(np->name, proc->name, sizeof(proc->name));
  
   pid = np->pid;
-
+  np->exitStatus = proc->exitStatus;
+  np->killed = proc->killed;
+  np->ctime = proc->ctime;//ticks;
+  np->ttime = proc->ttime;
+  np->stime = proc->stime;
+  np->retime = proc->retime;
+  np->rutime = proc->rutime;
+  np->jobID = proc->jobID;
+  #if defined(_policy_CFS)
+  np->priority = proc->priority;
+  #endif
+  
   // lock to force the compiler to emit the np->state write last.
   acquire(&ptable.lock);
   np->state = RUNNABLE;
@@ -310,6 +331,7 @@ wait(int *status)
 		p->stime = 0;
 		p->retime = 0;
 		p->rutime = 0;
+		p->jobID = 0;
         release(&ptable.lock);
         return pid;
       }
@@ -334,52 +356,61 @@ waitpid(int pid, int *status, int options)
   int pidExists;
 
   acquire(&ptable.lock);
-  pidExists= 0;
   for(;;){
     // Scan through table looking for zombie processes.
+	pidExists= 0;
     for (p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if (p->pid == pid){
-		pidExists= 1;
-		if (p->state == ZOMBIE){
-			// Found the proc.
-			if (status != 0){
-				*status= p->exitStatus;
-			}
-
-			kfree(p->kstack);
-			p->kstack = 0;
-			freevm(p->pgdir);
-			p->state = UNUSED;
-			p->pid = 0;
-			p->parent = 0;
-			p->name[0] = 0;
-			p->killed = 0;
-			p->exitStatus = 0;
-			p->ctime = 0;
-			p->ttime = 0;
-			p->stime = 0;
-			p->retime = 0;
-			p->rutime = 0;
-			release(&ptable.lock);
-			return pid;
-		}
+      if (p->pid != pid){
+		continue;
 	  }
+      pidExists= 1;
+      if (p->state == ZOMBIE){
+		// Found the proc.
+		if (status != 0){
+			*status= p->exitStatus;
+		}
+
+		kfree(p->kstack);
+		p->kstack = 0;
+		freevm(p->pgdir);
+		p->state = UNUSED;
+		p->pid = 0;
+		p->parent = 0;
+		p->name[0] = 0;
+		p->killed = 0;
+		p->exitStatus = 0;
+		p->ctime = 0;
+		p->ttime = 0;
+		p->stime = 0;
+		p->retime = 0;
+		p->rutime = 0;
+		p->jobID = 0;
+		release(&ptable.lock);
+		return pid;
+	  }
+	  break;
     }
 
 	// if NONBLOCKING flag is on, do not wait for the process.
     // No point waiting if we are killed.
-    if(!pidExists || status == NONBLOCKING || proc->killed){
+    if(!pidExists || (options == NONBLOCKING) || proc->killed){
       release(&ptable.lock);
       return -1;
     }
 
-    // Wait for children to exit.  (See wakeup1 call in proc_exit.)
-    sleep(proc, &ptable.lock);  //DOC: wait-sleep
+	if (p->parent->pid == proc->pid){
+		// Wait for children to exit.  (See wakeup1 call in proc_exit.)
+		sleep(proc, &ptable.lock);  //DOC: wait-sleep
+	} else {
+		release(&ptable.lock);
+		yield();
+		acquire(&ptable.lock);
+	}
   }
 }
 
 int
-wait_stat(int *wtime, int *rtime, int *iotime)
+wait_stat(int *wtime, int *rtime, int *iotime, int *status)
 {
   struct proc *p;
   int havekids, pid;
@@ -394,6 +425,9 @@ wait_stat(int *wtime, int *rtime, int *iotime)
       havekids = 1;
       if(p->state == ZOMBIE){
         // Found one.
+		if (status != 0){
+			*status= p->exitStatus;
+		}
 		*wtime= p->retime;
 		*rtime= p->rutime;
 		*iotime= p->stime;
@@ -413,6 +447,7 @@ wait_stat(int *wtime, int *rtime, int *iotime)
 		p->stime = 0;
 		p->retime = 0;
 		p->rutime = 0;
+		p->jobID = 0;
         release(&ptable.lock);
         return pid;
       }
@@ -426,6 +461,60 @@ wait_stat(int *wtime, int *rtime, int *iotime)
 
     // Wait for children to exit.  (See wakeup1 call in proc_exit.)
     sleep(proc, &ptable.lock);  //DOC: wait-sleep
+  }
+}
+
+int
+wait_jobid(int jobid)
+{
+  struct proc *p;
+  int found, foundAlive=-1;
+
+  acquire(&ptable.lock);
+  for(;;){
+    // Scan through table looking for the job.
+    found = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->jobID != jobid)
+        continue;
+      found = 1;
+      if(p->state == ZOMBIE){
+        // Found one.
+        kfree(p->kstack);
+        p->kstack = 0;
+        freevm(p->pgdir);
+        p->state = UNUSED;
+        p->pid = 0;
+        p->parent = 0;
+        p->name[0] = 0;
+        p->killed = 0;
+		p->exitStatus = 0;
+		p->ctime = 0;
+		p->ttime = 0;
+		p->stime = 0;
+		p->retime = 0;
+		p->rutime = 0;
+		p->jobID = 0;
+      } else {
+		foundAlive=0;
+	  }
+	  break;
+    }
+
+    // No point waiting if we don't have any processes in this job.
+    if(!found || proc->killed){
+      release(&ptable.lock);
+      return foundAlive;
+    }
+
+	if (p->parent->pid == proc->pid){
+		// Wait for children to exit.  (See wakeup1 call in proc_exit.)
+		sleep(proc, &ptable.lock);  //DOC: wait-sleep
+	} else {
+		release(&ptable.lock);
+		yield();
+		acquire(&ptable.lock);
+	}
   }
 }
 
@@ -672,17 +761,91 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
+      if(p->state == SLEEPING){
         p->state = RUNNABLE;
 		#if defined(_policy_FRR) || defined(_policy_FCFS)
 		  push(p->pid);
 	    #endif
+	  }
       release(&ptable.lock);
       return 0;
     }
   }
   release(&ptable.lock);
   return -1;
+}
+
+#if defined(_policy_CFS)
+int
+set_priority(int priority)
+{
+	int oldPriority;
+	
+	acquire(&ptable.lock);
+	oldPriority = proc->priority;
+	proc->priority = priority;
+	release(&ptable.lock);
+	return oldPriority;
+}
+#endif
+
+int
+set_jobID(void)
+{
+	acquire(&ptable.lock);
+	proc->jobID = proc->pid;
+	release(&ptable.lock);
+	return proc->jobID;
+}
+
+int
+print_jobID(int jobID, char *command)
+{
+	struct proc *p;
+	int found= -1;
+  
+	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(((p->state == SLEEPING) || (p->state == RUNNABLE) || (p->state == RUNNING)) &&
+		  (p->jobID == jobID) && (!(p->name[0] == 's' && p->name[1] == 'h' && p->name[2] == 0))){
+        // Found one.
+		if (found == -1){
+			cprintf("Job %d: %s\n", jobID, command);
+			found = 0;
+		}
+        cprintf("%d: %s\n", p->pid, p->name);
+      }
+    }
+	return found;
+}
+
+void
+top(void){
+	struct proc *p;
+	const char *state;
+	
+	cprintf("Format: pid ; name ; jobid ; state\n");
+	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+		switch (p->state){
+		case EMBRYO:
+			state = S_EMBRYO;
+		break;
+		case SLEEPING:
+			state = S_SLEEPING;
+		break;
+		case RUNNABLE:
+			state = S_RUNNABLE;
+		break;
+		case RUNNING:
+			state = S_RUNNING;
+		break;
+		case ZOMBIE:
+			state = S_ZOMBIE;
+		break;
+		default:
+		continue;
+		}
+		cprintf("%d ; %s ; %d ; %s\n", p->pid, p->name, p->jobID, state);
+	}
 }
 
 //PAGEBREAK: 36
@@ -770,16 +933,5 @@ push(int pid)
 	if (ptable.firstPos == ptable.lastPos){
 		ptable.isFull = 1;
 	}
-}
-#endif
-
-#if defined(_policy_CFS)
-int
-set_priority(int priority)
-{
-	acquire(&ptable.lock);
-	proc->priority = priority;
-	release(&ptable.lock);
-	return 0;
 }
 #endif

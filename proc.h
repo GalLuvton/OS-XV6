@@ -1,10 +1,10 @@
 // Segments in proc->gdt.
 #define NSEGS         7
-#define NONBLOCKING   0
-#define BLOCKING      1
 #define HIGH          1
-#define MEDIUM        1
-#define LOW           1
+#define MEDIUM        2
+#define LOW           3
+
+#include "syscall.h"
 
 // Per-CPU state
 struct cpu {
@@ -77,6 +77,7 @@ struct proc {
   int rutime;				   // Time spent in RUNNING
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
+  int jobID;				   // Job ID for this process
   #if defined(_policy_CFS)
   int priority;
   #endif

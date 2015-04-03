@@ -1,9 +1,8 @@
-// Test that fork fails gracefully.
-// Tiny executable so that the limit can be filling the proc table.
-
 #include "types.h"
 #include "stat.h"
 #include "user.h"
+
+#define STDIN 0
 
 int
 main(void)
@@ -12,7 +11,7 @@ main(void)
 	
 	buffer[1]= 0;
 	for (;;){
-		read(0, buffer, 1);
+		read(STDIN, buffer, 1);
 		if (buffer[0] == 'q'){
 			exit(0);
 		}

@@ -101,9 +101,7 @@ extern int sys_wait_stat(void);
 extern int sys_wait_jobid(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
-#if defined(_policy_CFS)
 extern int sys_set_priority(void);
-#endif
 extern int sys_set_jobID(void);
 extern int sys_print_jobID(void);
 extern int sys_top(void);
@@ -133,9 +131,7 @@ static int (*syscalls[])(void) = {
 [SYS_link]    	   sys_link,
 [SYS_mkdir]   	   sys_mkdir,
 [SYS_close]   	   sys_close,
-#if defined(_policy_CFS)
 [SYS_set_priority] sys_set_priority,
-#endif
 [SYS_set_jobID]    sys_set_jobID,
 [SYS_print_jobID]  sys_print_jobID,
 [SYS_top] 		   sys_top,

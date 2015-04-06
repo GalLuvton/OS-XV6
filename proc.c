@@ -222,13 +222,7 @@ fork(void)
   safestrcpy(np->name, proc->name, sizeof(proc->name));
  
   pid = np->pid;
-  np->exitStatus = proc->exitStatus;
-  np->killed = proc->killed;
-  np->ctime = proc->ctime;//ticks;
-  np->ttime = proc->ttime;
-  np->stime = proc->stime;
-  np->retime = proc->retime;
-  np->rutime = proc->rutime;
+  np->ctime = ticks;
   np->jobID = proc->jobID;
   #if defined(_policy_CFS)
   np->priority = proc->priority;
@@ -775,10 +769,10 @@ kill(int pid)
   return -1;
 }
 
-#if defined(_policy_CFS)
 int
 set_priority(int priority)
 {
+	#if defined(_policy_CFS)
 	int oldPriority;
 	
 	acquire(&ptable.lock);
@@ -786,8 +780,10 @@ set_priority(int priority)
 	proc->priority = priority;
 	release(&ptable.lock);
 	return oldPriority;
+	#else
+	panic("set_priority called while not in CFS mode!");
+	#endif
 }
-#endif
 
 int
 set_jobID(void)

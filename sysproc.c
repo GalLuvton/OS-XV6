@@ -156,8 +156,7 @@ sys_uptime(void)
   return xticks;
 }
 
-#if defined(_policy_CFS)
-// set the priority of a process
+// set the priority of a process (CFS only, otherwise enters panic)
 int
 sys_set_priority(void)
 {
@@ -167,7 +166,6 @@ sys_set_priority(void)
     return -1;
   return set_priority(priority);
 }
-#endif
 
 int
 sys_set_jobID(void)

@@ -58,7 +58,7 @@ trap(struct trapframe *tf)
     if(cpu->id == 0){
       acquire(&tickslock);
       ticks++;
-	  #if defined(_policy_FRR)
+	  #if defined(_policy_DEFAULT) || defined(_policy_FRR) || defined(_policy_CFS)
         runtime = (runtime+1)%(QUANTA+1);
       #endif
 	  updateProcRelatedTimers();

@@ -119,9 +119,7 @@ int             wait(int*);
 int				waitpid(int, int*, int);
 int				wait_stat(int*, int*, int*, int*);
 int				wait_jobid(int);
-#if defined(_policy_CFS)
 int				set_priority(int);
-#endif
 int				set_jobID(void);
 void			top(void);
 int				print_jobID(int, char*);

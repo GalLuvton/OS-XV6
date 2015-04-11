@@ -13,9 +13,15 @@ main(void)
 	for (;;){
 		read(STDIN, buffer, 1);
 		if (buffer[0] == 'q'){
-			exit(0);
+			break;
 		}
 		printf(1, buffer);
+	}
+	for (;;){
+		read(STDIN, buffer, 1);
+		if (buffer[0] == '\n'){
+			exit(0);
+		}
 	}
 	exit(0);
 }

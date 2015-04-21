@@ -24,6 +24,12 @@ exec(char *path, char **argv)
     return -1;
   }
   ilock(ip);
+  
+  struct thread *t;
+  for(t = proc->threads; t < &proc->threads[NTHREAD]; t++){
+	// t->killed = 1; //uncomment once global proc changes to global thread, so I dont kill myself
+  }
+  
   pgdir = 0;
 
   // Check ELF header
@@ -90,8 +96,8 @@ exec(char *path, char **argv)
   oldpgdir = proc->pgdir;
   proc->pgdir = pgdir;
   proc->sz = sz;
-  proc->tf->eip = elf.entry;  // main
-  proc->tf->esp = sp;
+  proc->threads->tf->eip = elf.entry;  // main
+  proc->threads->tf->esp = sp;
   switchuvm(proc);
   freevm(oldpgdir);
   return 0;

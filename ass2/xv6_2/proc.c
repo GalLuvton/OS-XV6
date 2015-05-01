@@ -405,6 +405,7 @@ sleep(void *chan, struct spinlock *lk)
   // Go to sleep.
   proc->threads->chan = chan;
   proc->state = SLEEPING;
+  proc->threads->state = T_SLEEPING;
   sched();
 
   // Tidy up.
@@ -431,6 +432,7 @@ wakeup1(void *chan)
 			for(t = p->threads; t < &p->threads[NTHREAD]; t++){
 				if(t->chan == chan){
 					t->state = T_RUNNABLE;
+					p->state = RUNNABLE;
 				}
 			}
 		}

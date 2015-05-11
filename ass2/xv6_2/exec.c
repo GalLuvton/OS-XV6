@@ -25,10 +25,26 @@ exec(char *path, char **argv)
   }
   ilock(ip);
   
+  struct proc *curProc = curThread->parent;
   struct thread *t;
-  for(t = proc->threads; t < &proc->threads[NTHREAD]; t++){
-	// t->killed = 1; //uncomment once global proc changes to global thread, so I dont kill myself
+  for(t = curProc->threads; t < &curProc->threads[NTHREAD]; t++){
+	if (t != curThread){
+		t->killed = 1;
+	}
   }
+  /*
+  int alive = 1;
+  while (alive){ // busywait on all threads to die
+    alive = 0;
+	for(t = curProc->threads; t < &curProc->threads[NTHREAD]; t++){
+		if (t != curThread){
+			if (t->killed == 0){
+				alive = 1;
+			}
+		}
+	}
+  }
+  */
   
   pgdir = 0;
 
@@ -90,15 +106,15 @@ exec(char *path, char **argv)
   for(last=s=path; *s; s++)
     if(*s == '/')
       last = s+1;
-  safestrcpy(proc->name, last, sizeof(proc->name));
+  safestrcpy(curProc->name, last, sizeof(curProc->name));
 
   // Commit to the user image.
-  oldpgdir = proc->pgdir;
-  proc->pgdir = pgdir;
-  proc->sz = sz;
-  proc->threads->tf->eip = elf.entry;  // main
-  proc->threads->tf->esp = sp;
-  switchuvm(proc);
+  oldpgdir = curProc->pgdir;
+  curProc->pgdir = pgdir;
+  curProc->sz = sz;
+  curThread->tf->eip = elf.entry;  // main
+  curThread->tf->esp = sp;
+  switchuvm(curProc);
   freevm(oldpgdir);
   return 0;
 

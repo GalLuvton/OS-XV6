@@ -16,7 +16,7 @@ struct cpu {
   
   // Cpu-local storage variables; see below
   struct cpu *cpu;
-  struct proc *proc;           // The currently-running process.
+  struct thread *curThread;           // The currently-running thread.
 };
 
 extern struct cpu cpus[NCPU];
@@ -31,7 +31,7 @@ extern int ncpu;
 // This is similar to how thread-local variables are implemented
 // in thread libraries such as Linux pthreads.
 extern struct cpu *cpu asm("%gs:0");       // &cpus[cpunum()]
-extern struct proc *proc asm("%gs:4");     // cpus[cpunum()].proc
+extern struct thread *curThread asm("%gs:4");     // cpus[cpunum()].thread
 
 //PAGEBREAK: 17
 // Saved registers for kernel context switches.
@@ -52,7 +52,7 @@ struct context {
   uint eip;
 };
 
-enum threadstate { T_FREE, T_RUNNING, T_RUNNABLE, T_SLEEPING };
+enum threadstate { T_FREE, T_EMBRYO, T_RUNNING, T_RUNNABLE, T_SLEEPING, T_ZOMBIE };
 
 // Per-thread state
 struct thread {

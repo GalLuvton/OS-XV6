@@ -21,10 +21,11 @@ argfd(int n, int *pfd, struct file **pf)
 {
   int fd;
   struct file *f;
+  struct proc *curProc = curThread->parent;
 
   if(argint(n, &fd) < 0)
     return -1;
-  if(fd < 0 || fd >= NOFILE || (f=proc->ofile[fd]) == 0)
+  if(fd < 0 || fd >= NOFILE || (f=curProc->ofile[fd]) == 0)
     return -1;
   if(pfd)
     *pfd = fd;
@@ -39,10 +40,11 @@ static int
 fdalloc(struct file *f)
 {
   int fd;
+  struct proc *curProc = curThread->parent;
 
   for(fd = 0; fd < NOFILE; fd++){
-    if(proc->ofile[fd] == 0){
-      proc->ofile[fd] = f;
+    if(curProc->ofile[fd] == 0){
+      curProc->ofile[fd] = f;
       return fd;
     }
   }
@@ -92,10 +94,11 @@ sys_close(void)
 {
   int fd;
   struct file *f;
+  struct proc *curProc = curThread->parent;
   
   if(argfd(0, &fd, &f) < 0)
     return -1;
-  proc->ofile[fd] = 0;
+  curProc->ofile[fd] = 0;
   fileclose(f);
   return 0;
 }
@@ -372,6 +375,7 @@ sys_chdir(void)
 {
   char *path;
   struct inode *ip;
+  struct proc *curProc = curThread->parent;
 
   begin_op();
   if(argstr(0, &path) < 0 || (ip = namei(path)) == 0){
@@ -385,9 +389,9 @@ sys_chdir(void)
     return -1;
   }
   iunlock(ip);
-  iput(proc->cwd);
+  iput(curProc->cwd);
   end_op();
-  proc->cwd = ip;
+  curProc->cwd = ip;
   return 0;
 }
 
@@ -423,6 +427,7 @@ sys_pipe(void)
   int *fd;
   struct file *rf, *wf;
   int fd0, fd1;
+  struct proc *curProc = curThread->parent;
 
   if(argptr(0, (void*)&fd, 2*sizeof(fd[0])) < 0)
     return -1;
@@ -431,7 +436,7 @@ sys_pipe(void)
   fd0 = -1;
   if((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0){
     if(fd0 >= 0)
-      proc->ofile[fd0] = 0;
+      curProc->ofile[fd0] = 0;
     fileclose(rf);
     fileclose(wf);
     return -1;

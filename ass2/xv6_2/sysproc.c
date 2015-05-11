@@ -39,7 +39,8 @@ sys_kill(void)
 int
 sys_getpid(void)
 {
-  return proc->pid;
+  struct proc *curProc = curThread->parent;
+  return curProc->pid;
 }
 
 int
@@ -47,10 +48,11 @@ sys_sbrk(void)
 {
   int addr;
   int n;
+  struct proc *curProc = curThread->parent;
 
   if(argint(0, &n) < 0)
     return -1;
-  addr = proc->sz;
+  addr = curProc->sz;
   if(growproc(n) < 0)
     return -1;
   return addr;
@@ -61,13 +63,14 @@ sys_sleep(void)
 {
   int n;
   uint ticks0;
+  struct proc *curProc = curThread->parent;
   
   if(argint(0, &n) < 0)
     return -1;
   acquire(&tickslock);
   ticks0 = ticks;
   while(ticks - ticks0 < n){
-    if(proc->killed){
+    if(curProc->killed){
       release(&tickslock);
       return -1;
     }

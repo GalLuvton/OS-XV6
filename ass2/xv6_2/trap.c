@@ -7,6 +7,7 @@
 #include "x86.h"
 #include "traps.h"
 #include "spinlock.h"
+#include "kthread.h"
 
 // Interrupt descriptor table (shared by all CPUs).
 struct gatedesc idt[256];
@@ -37,12 +38,20 @@ void
 trap(struct trapframe *tf)
 { 
   if(tf->trapno == T_SYSCALL){
-    if(curThread->parent->killed)
+    if(curThread->parent->killed){
       exit();
+	}
+	if(curThread->killed){
+      kthread_exit();
+	}
     curThread->tf = tf;
     syscall();
-    if(curThread->parent->killed)
+    if(curThread->parent->killed){
       exit();
+	}
+	if(curThread->killed){
+      kthread_exit();
+	}
     return;
   }
 
@@ -97,15 +106,24 @@ trap(struct trapframe *tf)
   // Force process exit if it has been killed and is in user space.
   // (If it is still executing in the kernel, let it keep running 
   // until it gets to the regular system call return.)
-  if(curThread && curThread->parent->killed && (tf->cs&3) == DPL_USER)
+  if(curThread && curThread->parent->killed && (tf->cs&3) == DPL_USER){
     exit();
+  }
+  if(curThread && curThread->killed && (tf->cs&3) == DPL_USER){
+    kthread_exit();
+  }
 
   // Force process to give up CPU on clock tick.
   // If interrupts were on while locks held, would need to check nlock.
-  if(curThread && curThread->state == T_RUNNING && tf->trapno == T_IRQ0+IRQ_TIMER)
+  if(curThread && curThread->state == T_RUNNING && tf->trapno == T_IRQ0+IRQ_TIMER){
     yield();
-
+  }
+  
   // Check if the process has been killed since we yielded
-  if(curThread && curThread->parent->killed && (tf->cs&3) == DPL_USER)
+  if(curThread && curThread->parent->killed && (tf->cs&3) == DPL_USER){
     exit();
+  }
+  if(curThread && curThread->killed && (tf->cs&3) == DPL_USER){
+    kthread_exit();
+  }
 }

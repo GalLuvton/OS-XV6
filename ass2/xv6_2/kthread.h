@@ -7,7 +7,7 @@
 
 int kthread_create(void*(*start_func)(), void* stack, uint stack_size);
 int kthread_id();
-void kthread_exit();
+void kthread_exit() __attribute__((noreturn));
 int kthread_join(int thread_id);
 
 int kthread_mutex_alloc();

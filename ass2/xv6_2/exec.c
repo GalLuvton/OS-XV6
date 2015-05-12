@@ -6,6 +6,7 @@
 #include "defs.h"
 #include "x86.h"
 #include "elf.h"
+#include "kthread.h"
 
 int
 exec(char *path, char **argv)
@@ -28,23 +29,19 @@ exec(char *path, char **argv)
   struct proc *curProc = curThread->parent;
   struct thread *t;
   for(t = curProc->threads; t < &curProc->threads[NTHREAD]; t++){
-	if (t != curThread){
+	if ((t->state == T_RUNNING || t->state == T_RUNNABLE || t->state == T_SLEEPING) && t != curThread){
 		t->killed = 1;
-	}
-  }
-  /*
-  int alive = 1;
-  while (alive){ // busywait on all threads to die
-    alive = 0;
-	for(t = curProc->threads; t < &curProc->threads[NTHREAD]; t++){
-		if (t != curThread){
-			if (t->killed == 0){
-				alive = 1;
-			}
+		if (t->state == T_SLEEPING){
+			t->state = T_RUNNABLE;
 		}
 	}
   }
-  */
+  // wait on all threads to die
+  for(t = curProc->threads; t < &curProc->threads[NTHREAD]; t++){
+	if ((t->state == T_RUNNING || t->state == T_RUNNABLE || t->state == T_SLEEPING) && t != curThread){
+		kthread_join(t->tid);
+	}
+  }
   
   pgdir = 0;
 

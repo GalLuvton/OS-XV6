@@ -139,3 +139,55 @@ sys_kthread_join(void)
 
   return kthread_join(id);
 }
+
+int
+sys_kthread_mutex_alloc(void)
+{
+  return kthread_mutex_alloc();
+}
+
+int
+sys_kthread_mutex_dealloc(void)
+{
+  int id;
+  
+  if(argint(0, &id) < 0)
+    return -1;
+
+  return kthread_mutex_dealloc(id);
+}
+
+int
+sys_kthread_mutex_lock(void)
+{
+  int id;
+  
+  if(argint(0, &id) < 0)
+    return -1;
+
+  return kthread_mutex_lock(id);
+}
+
+int
+sys_kthread_mutex_unlock(void)
+{
+  int id;
+  
+  if(argint(0, &id) < 0)
+    return -1;
+
+  return kthread_mutex_unlock(id);
+}
+
+int
+sys_kthread_mutex_yieldlock(void)
+{
+  int id1, id2;
+  
+  if(argint(0, &id1) < 0)
+    return -1;
+  if(argint(0, &id2) < 0)
+    return -1;
+
+  return kthread_mutex_yieldlock(id1, id2);
+}

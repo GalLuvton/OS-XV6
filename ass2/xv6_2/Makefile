@@ -166,6 +166,7 @@ UPROGS=\
 	_ln\
 	_ls\
 	_mkdir\
+	_mutex_test\
 	_play\
 	_rm\
 	_sh\

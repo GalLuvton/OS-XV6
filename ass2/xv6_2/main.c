@@ -28,6 +28,7 @@ main(void)
   consoleinit();   // I/O devices & their interrupts
   uartinit();      // serial port
   pinit();         // process table
+  muinit();		   // mutex table
   tvinit();        // trap vectors
   binit();         // buffer cache
   fileinit();      // file table

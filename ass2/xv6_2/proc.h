@@ -1,6 +1,7 @@
 // Segments in proc->gdt.
-#define NSEGS     7
-#define NTHREAD   16
+#define NSEGS     			 7
+#define NTHREAD   			 16
+#define MUTEX_WAITING_SIZE   ( NTHREAD * NPROC )
 
 #include "spinlock.h"
 
@@ -87,6 +88,19 @@ struct proc {
   char name[16];               // Process name (debugging)
   
   int runningThread;			// the currently running thread
+};
+
+enum mustate { MU_FREE, MU_UNLOCKED, MU_LOCKED };
+
+struct mu_block {
+	struct thread *thread;
+	void *chan;
+};
+
+struct kthread_mutex_t {
+	int id;
+	int state;
+	struct mu_block waitingLine[MUTEX_WAITING_SIZE];
 };
 
 // Process memory is laid out contiguously, low addresses first:

@@ -13,6 +13,11 @@ struct {
   struct proc proc[NPROC];
 } ptable;
 
+struct {
+  struct spinlock lock;
+  struct kthread_mutex_t mutexes[MAX_MUTEXES];
+} mutable;
+
 static struct proc *initproc;
 
 int nextpid = 1;
@@ -26,6 +31,25 @@ void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
+}
+
+void
+muinit(void)
+{
+  int id = 1;
+  struct kthread_mutex_t *mutex;
+  struct mu_block *oneBlock;
+  
+  for (mutex = mutable.mutexes; mutex < &mutable.mutexes[NPROC]; mutex++){
+	mutex->id = id++;
+	mutex->state = MU_FREE;
+	for (oneBlock = mutex->waitingLine; oneBlock < &mutex->waitingLine[MUTEX_WAITING_SIZE]; oneBlock++){
+		oneBlock->thread = 0;
+		oneBlock->chan = oneBlock;
+	}
+  }
+
+  initlock(&mutable.lock, "mutable");
 }
 
 //PAGEBREAK: 32
@@ -679,4 +703,174 @@ kthread_join(int thread_id)
 		// Wait for thread to exit.  (See wakeup1 call in proc_exit.)
 		sleep(t, &ptable.lock);  //DOC: wait-sleep
 	}
+}
+
+
+int
+checkRange(int mutex_id){
+	return (mutex_id > 0 && mutex_id < MAX_MUTEXES);
+}
+
+
+int
+kthread_mutex_alloc(void){
+	struct kthread_mutex_t *mutex;
+	
+	acquire(&mutable.lock);
+	
+	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[NPROC]; mutex++){
+		if (mutex->state == MU_FREE){
+			goto mu_found;
+		}
+	}
+	
+	release(&mutable.lock);
+	return -1;
+  
+mu_found:
+	mutex->state = MU_UNLOCKED;
+	release(&mutable.lock);
+	return mutex->id;
+}
+
+int
+kthread_mutex_dealloc(int mutex_id){
+	struct kthread_mutex_t *mutex;
+
+	if (!checkRange(mutex_id)){
+		return -1;
+	}
+	
+	acquire(&mutable.lock);
+	
+	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[NPROC]; mutex++){
+		if (mutex->id == mutex_id){
+			break;
+		}
+	}
+	
+	if (mutex->state == MU_LOCKED){
+		release(&mutable.lock);
+		return -1;
+	}
+	mutex->state = MU_FREE;
+	
+	release(&mutable.lock);
+	return 0;
+}
+
+int
+kthread_mutex_lock(int mutex_id){
+	struct kthread_mutex_t *mutex;
+	struct mu_block *oneBlock;
+	
+	if (!checkRange(mutex_id)){
+		return -1;
+	}
+	
+	acquire(&mutable.lock);
+	
+	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[NPROC]; mutex++){
+		if (mutex->id == mutex_id){
+			break;
+		}
+	}
+	
+	for (oneBlock = mutex->waitingLine; oneBlock < &mutex->waitingLine[MUTEX_WAITING_SIZE]; oneBlock++){
+		if (oneBlock->thread == 0){
+			break;
+		}
+	}
+	
+	oneBlock->thread = curThread;
+	
+	if (mutex->state == MU_LOCKED){
+		sleep(oneBlock->chan, &mutable.lock);
+	}
+	
+	mutex->state = MU_LOCKED;
+	release(&mutable.lock);
+	
+	return 0;
+}
+
+int
+kthread_mutex_unlock(int mutex_id){
+	struct kthread_mutex_t *mutex;
+	struct mu_block *oneBlock;
+	int i;
+	
+	if (!checkRange(mutex_id)){
+		return -1;
+	}
+	
+	acquire(&mutable.lock);
+	
+	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[NPROC]; mutex++){
+		if (mutex->id == mutex_id){
+			break;
+		}
+	}
+	
+	if (mutex->state != MU_LOCKED){
+		release(&mutable.lock);
+		return -1;
+	}
+	
+	if (mutex->waitingLine[1].thread == 0){
+		mutex->state = MU_UNLOCKED;
+		mutex->waitingLine[0].thread = 0;
+		release(&mutable.lock);
+		return 0;
+	}
+	
+	oneBlock = mutex->waitingLine; // [0]
+	for (i = 1; i < MUTEX_WAITING_SIZE; i++){
+		mutex->waitingLine[i-1] = mutex->waitingLine[i];
+	}
+	mutex->waitingLine[MUTEX_WAITING_SIZE-1] = *oneBlock;
+	oneBlock->thread = 0;
+	release(&mutable.lock);
+	wakeup(mutex->waitingLine[0].chan);
+	
+	return 0;
+}
+
+int
+kthread_mutex_yieldlock(int mutex_id1, int mutex_id2){
+	struct kthread_mutex_t *mutex1;
+	struct kthread_mutex_t *mutex2;
+	
+	if (!checkRange(mutex_id1) || !checkRange(mutex_id2)){
+		return -1;
+	}
+	
+	acquire(&mutable.lock);
+	
+	for (mutex1 = mutable.mutexes; mutex1 < &mutable.mutexes[NPROC]; mutex1++){
+		if (mutex1->id == mutex_id1){
+			break;
+		}
+	}
+	
+	if (mutex1->state != MU_LOCKED){
+		release(&mutable.lock);
+		return -1;
+	}
+	
+	for (mutex2 = mutable.mutexes; mutex2 < &mutable.mutexes[NPROC]; mutex2++){
+		if (mutex2->id == mutex_id2){
+			break;
+		}
+	}
+	
+	kthread_mutex_unlock(mutex2->id);
+	
+	if (mutex2->waitingLine[0].thread == 0){
+		kthread_mutex_unlock(mutex1->id);
+	}
+	else{
+		mutex1->waitingLine[0].thread = mutex2->waitingLine[0].thread;
+	}
+	return 0;
 }

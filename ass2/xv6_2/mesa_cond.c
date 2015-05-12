@@ -1,14 +1,14 @@
 #include "mesa_cond.h"
 
-
 mesa_cond_t* mesa_cond_alloc(){
 	int mutex_id;
 	mesa_cond_t* condition;
+	
 	mutex_id = kthread_mutex_alloc();
 	if (mutex_id < 0 ){
 		return 0;
 	}
-	condition = ( mesa_cond_t*)malloc(sizeof( mesa_cond_t*));
+	condition = (mesa_cond_t*)malloc(sizeof(mesa_cond_t*));
 	return condition;
 }
 

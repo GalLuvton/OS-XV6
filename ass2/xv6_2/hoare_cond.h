@@ -1,8 +1,12 @@
 #ifndef HOARE_COND_H
 #define	HOARE_COND_H
 
+#include "types.h"
+#include "kthread.h"
+#include "user.h"
+
 typedef struct hoare_cond {
-    //Your code here...
+    int mutex_id;
 } hoare_cond_t;
 
 hoare_cond_t* hoare_cond_alloc();

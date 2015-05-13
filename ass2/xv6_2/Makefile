@@ -165,6 +165,8 @@ UPROGS=\
 	_kill\
 	_ln\
 	_ls\
+	_slots_hoare\
+	_slots_mesa\
 	_mkdir\
 	_mutex_test\
 	_play\

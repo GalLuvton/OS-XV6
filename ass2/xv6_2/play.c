@@ -10,6 +10,7 @@ func(void){
 	
 	id = kthread_id();
 	printf(1, "in thread %d\n", id);
+	while(1);
 	
 	kthread_exit();
 }
@@ -27,9 +28,11 @@ main(int argc, char *argv[])
 	add = (void*)malloc(4000);
 	id = kthread_create(start_func, add, 4000);
 	
-	id = kthread_join(id);
+	//id = kthread_join(id);
+	sleep(50);
 	
 	printf(1, "main exiting: %d\n", id);
 	
 	exit();
 }
+

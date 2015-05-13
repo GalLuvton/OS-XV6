@@ -1,6 +1,7 @@
 #include "types.h"
 #include "stat.h"
 #include "user.h"
+#include "kthread.h"
 
 static void
 putc(int fd, char c)
@@ -35,6 +36,8 @@ printint(int fd, int xx, int base, int sgn)
     putc(fd, buf[i]);
 }
 
+static int mutex = 0;
+
 // Print to the given fd. Only understands %d, %x, %p, %s.
 void
 printf(int fd, char *fmt, ...)
@@ -43,6 +46,11 @@ printf(int fd, char *fmt, ...)
   int c, i, state;
   uint *ap;
 
+  if (mutex == 0){
+	mutex = kthread_mutex_alloc();
+  }
+  kthread_mutex_lock(mutex);
+  
   state = 0;
   ap = (uint*)(void*)&fmt + 1;
   for(i = 0; fmt[i]; i++){
@@ -82,4 +90,6 @@ printf(int fd, char *fmt, ...)
       state = 0;
     }
   }
+  
+  kthread_mutex_unlock(mutex);
 }

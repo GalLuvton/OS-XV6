@@ -186,7 +186,7 @@ sys_kthread_mutex_yieldlock(void)
   
   if(argint(0, &id1) < 0)
     return -1;
-  if(argint(0, &id2) < 0)
+  if(argint(1, &id2) < 0)
     return -1;
 
   return kthread_mutex_yieldlock(id1, id2);

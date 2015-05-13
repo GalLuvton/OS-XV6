@@ -1,11 +1,9 @@
 #ifndef MESA_COND_H
 #define	MESA_COND_H
 
-
 #include "types.h"
 #include "kthread.h"
 #include "user.h"
-
 
 typedef struct mesa_cond {
 	int mutex_id;

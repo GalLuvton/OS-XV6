@@ -212,6 +212,31 @@ fork(void)
   return pid;
 }
 
+void joinAllThreads(struct thread *thread){
+	struct thread *t;
+	struct proc *curProc = thread->parent;
+	
+	acquire(&ptable.lock);
+
+	for(t = curProc->threads; t < &curProc->threads[NTHREAD]; t++){
+		if ((t->state == T_RUNNING || t->state == T_RUNNABLE || t->state == T_SLEEPING) && t->tid != thread->tid){
+			t->killed = 1;
+			if (t->state == T_SLEEPING){
+				t->state = T_RUNNABLE;
+			}
+		}
+	}
+	
+	release(&ptable.lock);
+	
+	// wait on all threads to die
+	for(t = curProc->threads; t < &curProc->threads[NTHREAD]; t++){
+		if ((t->state == T_RUNNING || t->state == T_RUNNABLE || t->state == T_SLEEPING) && t->tid != thread->tid){
+			kthread_join(t->tid);
+		}
+	}
+}
+
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait() to find out it exited.
@@ -226,26 +251,9 @@ exit(void)
   if(curProc == initproc)
     panic("init exiting");
 
-  acquire(&ptable.lock);
 	
-  struct thread *t;
-  for(t = curProc->threads; t < &curProc->threads[NTHREAD]; t++){
-	if ((t->state == T_RUNNING || t->state == T_RUNNABLE || t->state == T_SLEEPING) && t != curThread){
-		t->killed = 1;
-		if (t->state == T_SLEEPING){
-			t->state = T_RUNNABLE;
-		}
-	}
-  }
-  // wait on all threads to die
-  for(t = curProc->threads; t < &curProc->threads[NTHREAD]; t++){
-	if ((t->state == T_RUNNING || t->state == T_RUNNABLE || t->state == T_SLEEPING) && t != curThread){
-		kthread_join(t->tid);
-	}
-  }
-  
-  release(&ptable.lock);
-	
+  joinAllThreads(curThread);
+
   // Close all open files.
   for(fd = 0; fd < NOFILE; fd++){
     if(curProc->ofile[fd]){
@@ -619,7 +627,7 @@ t_found:
 	
 	t->state = T_RUNNABLE;
 	release(&ptable.lock);
-	
+
 	return t->tid;
 }
 
@@ -718,7 +726,7 @@ kthread_mutex_alloc(void){
 	
 	acquire(&mutable.lock);
 	
-	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[NPROC]; mutex++){
+	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[MAX_MUTEXES]; mutex++){
 		if (mutex->state == MU_FREE){
 			goto mu_found;
 		}
@@ -743,7 +751,7 @@ kthread_mutex_dealloc(int mutex_id){
 	
 	acquire(&mutable.lock);
 	
-	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[NPROC]; mutex++){
+	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[MAX_MUTEXES]; mutex++){
 		if (mutex->id == mutex_id){
 			break;
 		}
@@ -769,8 +777,8 @@ kthread_mutex_lock(int mutex_id){
 	}
 	
 	acquire(&mutable.lock);
-	
-	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[NPROC]; mutex++){
+
+	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[MAX_MUTEXES]; mutex++){
 		if (mutex->id == mutex_id){
 			break;
 		}
@@ -787,7 +795,7 @@ kthread_mutex_lock(int mutex_id){
 	if (mutex->state == MU_LOCKED){
 		sleep(oneBlock->chan, &mutable.lock);
 	}
-	
+
 	mutex->state = MU_LOCKED;
 	release(&mutable.lock);
 	
@@ -797,42 +805,42 @@ kthread_mutex_lock(int mutex_id){
 int
 kthread_mutex_unlock(int mutex_id){
 	struct kthread_mutex_t *mutex;
-	struct mu_block *oneBlock;
+	struct mu_block oneBlock;
 	int i;
-	
+
 	if (!checkRange(mutex_id)){
 		return -1;
 	}
 	
 	acquire(&mutable.lock);
-	
-	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[NPROC]; mutex++){
+
+	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[MAX_MUTEXES]; mutex++){
 		if (mutex->id == mutex_id){
 			break;
 		}
 	}
-	
+
 	if (mutex->state != MU_LOCKED){
 		release(&mutable.lock);
 		return -1;
 	}
 	
-	if (mutex->waitingLine[1].thread == 0){
-		mutex->state = MU_UNLOCKED;
-		mutex->waitingLine[0].thread = 0;
-		release(&mutable.lock);
-		return 0;
-	}
-	
-	oneBlock = mutex->waitingLine; // [0]
+	oneBlock = mutex->waitingLine[0];
 	for (i = 1; i < MUTEX_WAITING_SIZE; i++){
 		mutex->waitingLine[i-1] = mutex->waitingLine[i];
 	}
-	mutex->waitingLine[MUTEX_WAITING_SIZE-1] = *oneBlock;
-	oneBlock->thread = 0;
+	mutex->waitingLine[MUTEX_WAITING_SIZE-1] = oneBlock;
+	oneBlock.thread = 0;
+	
+	if (mutex->waitingLine[0].thread == 0){
+		mutex->state = MU_UNLOCKED;
+		release(&mutable.lock);
+		return 0;
+	}
+
 	release(&mutable.lock);
 	wakeup(mutex->waitingLine[0].chan);
-	
+
 	return 0;
 }
 
@@ -840,14 +848,14 @@ int
 kthread_mutex_yieldlock(int mutex_id1, int mutex_id2){
 	struct kthread_mutex_t *mutex1;
 	struct kthread_mutex_t *mutex2;
-	
+
 	if (!checkRange(mutex_id1) || !checkRange(mutex_id2)){
 		return -1;
 	}
 	
 	acquire(&mutable.lock);
 	
-	for (mutex1 = mutable.mutexes; mutex1 < &mutable.mutexes[NPROC]; mutex1++){
+	for (mutex1 = mutable.mutexes; mutex1 < &mutable.mutexes[MAX_MUTEXES]; mutex1++){
 		if (mutex1->id == mutex_id1){
 			break;
 		}
@@ -858,11 +866,13 @@ kthread_mutex_yieldlock(int mutex_id1, int mutex_id2){
 		return -1;
 	}
 	
-	for (mutex2 = mutable.mutexes; mutex2 < &mutable.mutexes[NPROC]; mutex2++){
+	for (mutex2 = mutable.mutexes; mutex2 < &mutable.mutexes[MAX_MUTEXES]; mutex2++){
 		if (mutex2->id == mutex_id2){
 			break;
 		}
 	}
+	
+	release(&mutable.lock);
 	
 	kthread_mutex_unlock(mutex2->id);
 	

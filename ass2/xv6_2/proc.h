@@ -103,6 +103,8 @@ struct kthread_mutex_t {
 	struct mu_block waitingLine[MUTEX_WAITING_SIZE];
 };
 
+void joinAllThreads(struct thread *thread);
+
 // Process memory is laid out contiguously, low addresses first:
 //   text
 //   original data and bss

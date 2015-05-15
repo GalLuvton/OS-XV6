@@ -36,7 +36,9 @@ printint(int fd, int xx, int base, int sgn)
     putc(fd, buf[i]);
 }
 
-//static int mutex = 0;
+#if defined(_sync_print)
+static int mutex = 0;
+#endif
 
 // Print to the given fd. Only understands %d, %x, %p, %s.
 void
@@ -46,12 +48,13 @@ printf(int fd, char *fmt, ...)
   int c, i, state;
   uint *ap;
 
-  /*
+  #if defined(_sync_print)
   if (mutex == 0){
 	mutex = kthread_mutex_alloc();
   }
   kthread_mutex_lock(mutex);
-  */
+  #endif
+  
   
   state = 0;
   ap = (uint*)(void*)&fmt + 1;
@@ -93,5 +96,7 @@ printf(int fd, char *fmt, ...)
     }
   }
   
-  //kthread_mutex_unlock(mutex);
+  #if defined(_sync_print)
+  kthread_mutex_unlock(mutex);
+  #endif
 }

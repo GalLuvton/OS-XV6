@@ -808,16 +808,14 @@ kthread_mutex_lock(int mutex_id){
 }
 
 int
-kthread_mutex_unlock(int mutex_id){
+kthread_mutex_unlock1(int mutex_id){
 	struct kthread_mutex_t *mutex;
 	struct mu_block oneBlock;
-	int i;
+	int i, count = 0;
 
 	if (!checkRange(mutex_id)){
 		return -1;
 	}
-	
-	acquire(&mutable.lock);
 
 	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[MAX_MUTEXES]; mutex++){
 		if (mutex->id == mutex_id){
@@ -826,12 +824,14 @@ kthread_mutex_unlock(int mutex_id){
 	}
 
 	if (mutex->state != MU_LOCKED){
-		release(&mutable.lock);
 		return -1;
 	}
 	
 	oneBlock = mutex->waitingLine[0];
 	for (i = 1; i < MUTEX_WAITING_SIZE; i++){
+		if (mutex->waitingLine[i].thread != 0){
+			count++;
+		}
 		mutex->waitingLine[i-1] = mutex->waitingLine[i];
 	}
 	mutex->waitingLine[MUTEX_WAITING_SIZE-1] = oneBlock;
@@ -839,14 +839,23 @@ kthread_mutex_unlock(int mutex_id){
 	
 	if (mutex->waitingLine[0].thread == 0){
 		mutex->state = MU_UNLOCKED;
-		release(&mutable.lock);
 		return 0;
 	}
 
-	release(&mutable.lock);
 	wakeup(mutex->waitingLine[0].chan);
 
-	return 0;
+	return count;
+}
+
+int
+kthread_mutex_unlock(int mutex_id){
+	int ans;
+	
+	acquire(&mutable.lock);
+	ans = kthread_mutex_unlock1(mutex_id);
+	release(&mutable.lock);
+
+	return ans;
 }
 
 int
@@ -876,16 +885,16 @@ kthread_mutex_yieldlock(int mutex_id1, int mutex_id2){
 			break;
 		}
 	}
-	
-	release(&mutable.lock);
-	
-	kthread_mutex_unlock(mutex2->id);
+
+	kthread_mutex_unlock1(mutex2->id);
 	
 	if (mutex2->waitingLine[0].thread == 0){
-		kthread_mutex_unlock(mutex1->id);
+		kthread_mutex_unlock1(mutex1->id);
 	}
 	else{
 		mutex1->waitingLine[0].thread = mutex2->waitingLine[0].thread;
 	}
+	
+	release(&mutable.lock);
 	return 0;
 }

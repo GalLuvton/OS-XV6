@@ -40,7 +40,7 @@ muinit(void)
   struct kthread_mutex_t *mutex;
   struct mu_block *oneBlock;
   
-  for (mutex = mutable.mutexes; mutex < &mutable.mutexes[NPROC]; mutex++){
+  for (mutex = mutable.mutexes; mutex < &mutable.mutexes[MAX_MUTEXES]; mutex++){
 	mutex->id = id++;
 	mutex->state = MU_FREE;
 	for (oneBlock = mutex->waitingLine; oneBlock < &mutex->waitingLine[MUTEX_WAITING_SIZE]; oneBlock++){
@@ -716,14 +716,14 @@ kthread_join(int thread_id)
 
 int
 checkRange(int mutex_id){
-	return (mutex_id > 0 && mutex_id < MAX_MUTEXES);
+	return (mutex_id > 0 && mutex_id <= MAX_MUTEXES);
 }
 
 
 int
 kthread_mutex_alloc(void){
 	struct kthread_mutex_t *mutex;
-	
+
 	acquire(&mutable.lock);
 	
 	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[MAX_MUTEXES]; mutex++){
@@ -757,7 +757,7 @@ kthread_mutex_dealloc(int mutex_id){
 		}
 	}
 	
-	if (mutex->state == MU_LOCKED){
+	if (mutex->state == MU_LOCKED || mutex->state == MU_FREE){
 		release(&mutable.lock);
 		return -1;
 	}
@@ -788,6 +788,11 @@ kthread_mutex_lock(int mutex_id){
 		if (oneBlock->thread == 0){
 			break;
 		}
+	}
+	
+	if (mutex->state == MU_FREE){
+		release(&mutable.lock);
+		return -1;
 	}
 	
 	oneBlock->thread = curThread;

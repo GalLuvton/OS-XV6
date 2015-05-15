@@ -7,7 +7,7 @@
 
 typedef struct mesa_cond {
 	int mutex_id;
-	int internal_lock;
+	int internalLock;
 	int numberOfSleepers;
 } mesa_cond_t;
 

@@ -16,7 +16,7 @@ mesa_cond_t* mesa_cond_alloc(){
 	
 	condition = (mesa_cond_t*)malloc(sizeof(mesa_cond_t));
 	condition->mutex_id = mu_id1;
-	condition->internal_lock = mu_id2;
+	condition->internalLock = mu_id2;
 	condition->numberOfSleepers = 0;
 	return condition;
 }
@@ -29,7 +29,7 @@ int mesa_cond_dealloc(mesa_cond_t* cond){
 	return 0;	
 }
 
-int mesa_cond_wait(mesa_cond_t* cond,int mutex_id){
+int mesa_cond_wait(mesa_cond_t* cond, int mutex_id){
 	cond->numberOfSleepers++;
 	if (kthread_mutex_unlock(mutex_id) < 0){
 		return -1;
@@ -40,14 +40,14 @@ int mesa_cond_wait(mesa_cond_t* cond,int mutex_id){
 }
 
 int mesa_cond_signal(mesa_cond_t* cond){
-	if (kthread_mutex_lock(cond->internal_lock) < 0){
+	if (kthread_mutex_lock(cond->internalLock) < 0){
 		return -1;
 	}
-	while (cond->numberOfSleepers > 0 && (kthread_mutex_unlock(cond->mutex_id) == 0));
+	while (cond->numberOfSleepers > 0 && (kthread_mutex_unlock(cond->mutex_id) < 0));
 	if (cond->numberOfSleepers > 0){
 		cond->numberOfSleepers--;
 	}
-	kthread_mutex_unlock(cond->internal_lock);
+	kthread_mutex_unlock(cond->internalLock);
 	return 0;
 }
 

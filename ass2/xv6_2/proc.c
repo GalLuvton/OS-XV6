@@ -811,7 +811,7 @@ int
 kthread_mutex_unlock1(int mutex_id){
 	struct kthread_mutex_t *mutex;
 	struct mu_block oneBlock;
-	int i, count = 0;
+	int i;
 
 	if (!checkRange(mutex_id)){
 		return -1;
@@ -829,9 +829,6 @@ kthread_mutex_unlock1(int mutex_id){
 	
 	oneBlock = mutex->waitingLine[0];
 	for (i = 1; i < MUTEX_WAITING_SIZE; i++){
-		if (mutex->waitingLine[i].thread != 0){
-			count++;
-		}
 		mutex->waitingLine[i-1] = mutex->waitingLine[i];
 	}
 	mutex->waitingLine[MUTEX_WAITING_SIZE-1] = oneBlock;
@@ -844,7 +841,7 @@ kthread_mutex_unlock1(int mutex_id){
 
 	wakeup(mutex->waitingLine[0].chan);
 
-	return count;
+	return 0;
 }
 
 int

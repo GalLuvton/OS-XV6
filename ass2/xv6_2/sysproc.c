@@ -191,3 +191,17 @@ sys_kthread_mutex_yieldlock(void)
 
   return kthread_mutex_yieldlock(id1, id2);
 }
+
+int
+sys_top(void)
+{
+  top();
+  return 0;
+}
+
+int
+sys_mu_top(void)
+{
+  mu_top();
+  return 0;
+}

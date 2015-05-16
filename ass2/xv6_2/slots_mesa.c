@@ -109,9 +109,12 @@ main(int argc, char *argv[])
 
 	printf(1, "main- done!!\n");
 	
-	mesa_slots_monitor_dealloc(monitor);
-
-	printf(1, "main- exiting\n");
+	if (mesa_slots_monitor_dealloc(monitor) < 0){
+		printf(1, "main- couldn't dealloc monitor! exiting\n");
+	} else {
+		printf(1, "main- exiting\n");
+	}
+	
 	exit();
 
 bad_grader_create:

@@ -119,6 +119,8 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+void            top(void);
+void            mu_top(void);
 
 // swtch.S
 void            swtch(struct context**, struct context*);

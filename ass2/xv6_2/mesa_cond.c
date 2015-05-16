@@ -25,12 +25,19 @@ int mesa_cond_dealloc(mesa_cond_t* cond){
 	if (kthread_mutex_dealloc(cond->mutex_id) < 0){
 		return -1;
 	}
+	if (kthread_mutex_dealloc(cond->internalLock) < 0){
+		return -1;
+	}
 	free(cond);
 	return 0;	
 }
 
 int mesa_cond_wait(mesa_cond_t* cond, int mutex_id){
+	if (kthread_mutex_lock(cond->internalLock) < 0){
+		return -1;
+	}
 	cond->numberOfSleepers++;
+	kthread_mutex_unlock(cond->internalLock);
 	if (kthread_mutex_unlock(mutex_id) < 0){
 		return -1;
 	}

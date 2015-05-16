@@ -7,6 +7,8 @@
 
 typedef struct hoare_cond {
     int mutex_id;
+	int internalLock;
+	int numberOfSleepers;
 } hoare_cond_t;
 
 hoare_cond_t* hoare_cond_alloc();

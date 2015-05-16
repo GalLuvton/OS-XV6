@@ -17,7 +17,7 @@ student(void){
 	printf(1, "Student %d says: good morning!\n", id);
 	
 	hoare_slots_monitor_takeslot(monitor);
-	//printf(1, "Student %d says: slots left: %d\n", id, monitor->count);
+	printf(1, "Student %d says: slots left: %d\n", id, monitor->count);
 
 	printf(1, "Student %d says: bye bye!\n", id);
 	
@@ -32,7 +32,7 @@ grader(void){
 	printf(1, "Grader %d says: I hate this job!\n", id);
 	
 	while (hoare_slots_monitor_addslots(monitor, slotsPerRound) > -1){
-		//printf(1, "Grader %d says: slots left: %d\n", id, monitor->count);
+		printf(1, "Grader %d says: slots left: %d\n", id, monitor->count);
 	}
 	
 	printf(1, "Grader %d says: fuck you BGU!\n", id);
@@ -102,16 +102,19 @@ main(int argc, char *argv[])
 	printf(1, "main- killing grader\n");
 	
 	while ((res = hoare_slots_monitor_stopadding(monitor) < 0));
-
+	
 	printf(1, "main- waiting for grader\n");
 	
 	while ((res = kthread_join(graderId) < 0));
 
 	printf(1, "main- done!!\n");
 	
-	hoare_slots_monitor_dealloc(monitor);
-
-	printf(1, "main- exiting\n");
+	if (hoare_slots_monitor_dealloc(monitor) < 0){
+		printf(1, "main- couldn't dealloc monitor! exiting\n");
+	} else {
+		printf(1, "main- exiting\n");
+	}
+	
 	exit();
 
 bad_grader_create:

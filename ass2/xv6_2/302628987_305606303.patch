@@ -1,5 +1,5 @@
 diff --git a/Makefile b/Makefile
-index c94c71d..f2563d0 100644
+index c94c71d..1484148 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -69,6 +69,11 @@ QEMU = $(shell if which qemu > /dev/null; \
@@ -34,7 +34,7 @@ index c94c71d..f2563d0 100644
  
  _%: %.o $(ULIB)
  	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
-@@ -165,13 +174,18 @@ UPROGS=\
+@@ -165,7 +174,11 @@ UPROGS=\
  	_kill\
  	_ln\
  	_ls\
@@ -46,13 +46,6 @@ index c94c71d..f2563d0 100644
  	_rm\
  	_sh\
  	_stressfs\
- 	_usertests\
- 	_wc\
- 	_zombie\
-+	_badplay\
- 
- fs.img: mkfs README $(UPROGS)
- 	./mkfs fs.img README $(UPROGS)
 diff --git a/badplay.c b/badplay.c
 new file mode 100644
 index 0000000..b229b4b
@@ -346,7 +339,7 @@ index 766dc30..bef321c 100644
          ilock(ip);
          return -1;
 diff --git a/defs.h b/defs.h
-index 43431e3..e943210 100644
+index 43431e3..982f254 100644
 --- a/defs.h
 +++ b/defs.h
 @@ -110,6 +110,7 @@ int             fork(void);
@@ -357,6 +350,15 @@ index 43431e3..e943210 100644
  void            procdump(void);
  void            scheduler(void) __attribute__((noreturn));
  void            sched(void);
+@@ -118,6 +119,8 @@ void            userinit(void);
+ int             wait(void);
+ void            wakeup(void*);
+ void            yield(void);
++void            top(void);
++void            mu_top(void);
+ 
+ // swtch.S
+ void            swtch(struct context**, struct context*);
 diff --git a/exec.c b/exec.c
 index 8dbbdb6..7cc953c 100644
 --- a/exec.c
@@ -410,23 +412,30 @@ index 1803cb4..632d565 100644
      ilock(ip);
 diff --git a/hoare_cond.c b/hoare_cond.c
 new file mode 100644
-index 0000000..e7bdbc5
+index 0000000..c9bfeaa
 --- /dev/null
 +++ b/hoare_cond.c
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,69 @@
 +#include "hoare_cond.h"
 +
 +hoare_cond_t* hoare_cond_alloc(){
-+	int mu_id;
++	int mu_id1, mu_id2;
 +	hoare_cond_t* condition;
 +	
-+	mu_id = kthread_mutex_alloc();
-+	if (mu_id < 0){
++	mu_id1 = kthread_mutex_alloc();
++	if (mu_id1 < 0){
++		return 0;
++	}
++	
++	mu_id2 = kthread_mutex_alloc();
++	if (mu_id2 < 0){
 +		return 0;
 +	}
 +	
 +	condition = (hoare_cond_t*)malloc(sizeof(hoare_cond_t));
-+	condition->mutex_id = mu_id;
++	condition->mutex_id = mu_id1;
++	condition->internalLock = mu_id2;
++	condition->numberOfSleepers = 0;
 +	return condition;
 +}
 +
@@ -434,11 +443,19 @@ index 0000000..e7bdbc5
 +	if (kthread_mutex_dealloc(cond->mutex_id) < 0){
 +		return -1;
 +	}
++	if (kthread_mutex_dealloc(cond->internalLock) < 0){
++		return -1;
++	}
 +	free(cond);
 +	return 0;	
 +}
 +
 +int hoare_cond_wait(hoare_cond_t* cond, int mu_id){
++	if (kthread_mutex_lock(cond->internalLock) < 0){
++		return -1;
++	}
++	cond->numberOfSleepers++;
++	kthread_mutex_unlock(cond->internalLock);
 +	if (kthread_mutex_unlock(mu_id) < 0){
 +		return -1;
 +	}
@@ -447,18 +464,32 @@ index 0000000..e7bdbc5
 +}
 +
 +int hoare_cond_signal(hoare_cond_t* cond, int mu_id){
-+	if (kthread_mutex_yieldlock(cond->mutex_id, mu_id) < 0){
++	int retval;
++	if (kthread_mutex_lock(cond->internalLock) < 0){
 +		return -1;
 +	}
-+
++	while(1){
++		if (cond->numberOfSleepers == 0){
++			kthread_mutex_unlock(mu_id);
++			break;
++		}
++		retval = kthread_mutex_yieldlock(mu_id, cond->mutex_id);
++		if (retval == 0){
++			break;
++		}
++	}
++	if (cond->numberOfSleepers > 0){
++		cond->numberOfSleepers--;
++	}
++	kthread_mutex_unlock(cond->internalLock);
 +	return 0;
 +}
 +
 diff --git a/hoare_cond.h b/hoare_cond.h
-index 1f779d6..3ee0acc 100644
+index 1f779d6..5763964 100644
 --- a/hoare_cond.h
 +++ b/hoare_cond.h
-@@ -1,8 +1,12 @@
+@@ -1,8 +1,14 @@
  #ifndef HOARE_COND_H
  #define	HOARE_COND_H
  
@@ -469,20 +500,22 @@ index 1f779d6..3ee0acc 100644
  typedef struct hoare_cond {
 -    //Your code here...
 +    int mutex_id;
++	int internalLock;
++	int numberOfSleepers;
  } hoare_cond_t;
  
  hoare_cond_t* hoare_cond_alloc();
 diff --git a/hoare_slots_monitor.c b/hoare_slots_monitor.c
 new file mode 100644
-index 0000000..85d8a95
+index 0000000..17a9794
 --- /dev/null
 +++ b/hoare_slots_monitor.c
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,107 @@
 +#include "hoare_slots_monitor.h"
 +
 +hoare_slots_monitor_t*
 +hoare_slots_monitor_alloc(){
-+	hoare_slots_monitor_t* monitor = (hoare_slots_monitor_t*)malloc(sizeof( hoare_slots_monitor_t));
++	hoare_slots_monitor_t* monitor = (hoare_slots_monitor_t*)malloc(sizeof(hoare_slots_monitor_t));
 +	
 +	if ((monitor->mutex_id = kthread_mutex_alloc()) <= 0){
 +		return 0;
@@ -508,20 +541,18 @@ index 0000000..85d8a95
 +
 +int
 +hoare_slots_monitor_dealloc(hoare_slots_monitor_t* monitor){
-+	if (kthread_mutex_dealloc(monitor->mutex_id) <= 0){
-+		return -1;		
-+	}
++	int a,b,c;
 +	
-+	if (hoare_cond_dealloc(monitor-> empty) < 0){
-+		return -1;
-+	}
-+	
-+	if (hoare_cond_dealloc(monitor-> hasElements) < 0){
-+		return -1;
-+	}
-+	
++	kthread_mutex_unlock(monitor->empty->mutex_id);
++	kthread_mutex_unlock(monitor->hasElements->mutex_id);
++	a = kthread_mutex_dealloc(monitor->mutex_id);
++	b = hoare_cond_dealloc(monitor->hasElements);
++	c = hoare_cond_dealloc(monitor->empty);
 +	free(monitor);
-+	return 0;	
++	if (a >= 0 && b >= 0 && c >= 0){
++		return 0;
++	}
++	return -1;
 +}
 +
 +int
@@ -536,7 +567,7 @@ index 0000000..85d8a95
 +			return -1;
 +		}
 +	}
-+		
++
 +	if (monitor->doneAddingSlots){
 +		kthread_mutex_unlock(monitor->mutex_id);
 +		return -1;
@@ -555,11 +586,17 @@ index 0000000..85d8a95
 +		return -1;
 +	}
 +	
++	if (monitor->count > 0){
++		goto keepOnRolling;
++	}
++	
 +	if (hoare_cond_wait(monitor->hasElements, monitor->mutex_id) < 0){
 +		kthread_mutex_unlock(monitor->mutex_id);
 +		return -1;
 +	}
 +	
++keepOnRolling:
++
 +	monitor->count--;
 +	if (monitor->count == 0){
 +		hoare_cond_signal(monitor->empty, monitor->mutex_id);
@@ -628,10 +665,10 @@ index 8a73c0f..8ff1298 100644
    fileinit();      // file table
 diff --git a/mesa_cond.c b/mesa_cond.c
 new file mode 100644
-index 0000000..e16536a
+index 0000000..835c359
 --- /dev/null
 +++ b/mesa_cond.c
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,60 @@
 +#include "mesa_cond.h"
 +
 +mesa_cond_t* mesa_cond_alloc(){
@@ -659,12 +696,19 @@ index 0000000..e16536a
 +	if (kthread_mutex_dealloc(cond->mutex_id) < 0){
 +		return -1;
 +	}
++	if (kthread_mutex_dealloc(cond->internalLock) < 0){
++		return -1;
++	}
 +	free(cond);
 +	return 0;	
 +}
 +
 +int mesa_cond_wait(mesa_cond_t* cond, int mutex_id){
++	if (kthread_mutex_lock(cond->internalLock) < 0){
++		return -1;
++	}
 +	cond->numberOfSleepers++;
++	kthread_mutex_unlock(cond->internalLock);
 +	if (kthread_mutex_unlock(mutex_id) < 0){
 +		return -1;
 +	}
@@ -707,7 +751,7 @@ index 9ef7bc7..3cc802e 100644
  mesa_cond_t* mesa_cond_alloc();
 diff --git a/mesa_slots_monitor.c b/mesa_slots_monitor.c
 new file mode 100644
-index 0000000..c6bd543
+index 0000000..9a6405e
 --- /dev/null
 +++ b/mesa_slots_monitor.c
 @@ -0,0 +1,125 @@
@@ -756,14 +800,13 @@ index 0000000..c6bd543
 +mesa_slots_monitor_dealloc(mesa_slots_monitor_t* monitor){
 +	int a,b,c;
 +	
-+	a = ((kthread_mutex_dealloc(monitor->mutex_id)) < 0);
-+	b = ((mesa_cond_dealloc(monitor->hasElements)) < 0);
-+	c = ((mesa_cond_dealloc(monitor->empty)) < 0);
-+	monitor->mutex_id = 0;
-+	monitor->hasElements = 0;
-+	monitor->empty = 0;
++	kthread_mutex_unlock(monitor->empty->mutex_id);
++	kthread_mutex_unlock(monitor->hasElements->mutex_id);
++	a = kthread_mutex_dealloc(monitor->mutex_id);
++	b = mesa_cond_dealloc(monitor->hasElements);
++	c = mesa_cond_dealloc(monitor->empty);
 +	free(monitor);
-+	if (a > 0 && b > 0 && c > 0){
++	if (a >= 0 && b >= 0 && c >= 0){
 +		return 0;
 +	}
 +	return -1;
@@ -783,6 +826,7 @@ index 0000000..c6bd543
 +	}
 +
 +	if (monitor->doneAddingSlots){
++		kthread_mutex_unlock(monitor->mutex_id);
 +		return -1;
 +	}
 +
@@ -858,10 +902,10 @@ index 42c5580..6e09637 100644
  mesa_slots_monitor_t* mesa_slots_monitor_alloc();
 diff --git a/mutex_test.c b/mutex_test.c
 new file mode 100644
-index 0000000..c9a550c
+index 0000000..166f966
 --- /dev/null
 +++ b/mutex_test.c
-@@ -0,0 +1,326 @@
+@@ -0,0 +1,335 @@
 +#include "types.h"
 +#include "stat.h"
 +#include "user.h"
@@ -1163,6 +1207,8 @@ index 0000000..c9a550c
 +    }
 +  }
 +
++  #ifndef _sync_print
++  /* if print is defined, this part fucks up quite a bit */
 +  /* chack that mutexes are really limited by MAX_MUTEXES */
 +  for (i=0 ; i<MAX_MUTEXES ; i++){
 +    mutex[i] = kthread_mutex_alloc();
@@ -1175,12 +1221,19 @@ index 0000000..c9a550c
 +  for (i=0 ; i< MAX_MUTEXES ; i++){
 +    ASSERT((kthread_mutex_dealloc(mutex[i]) == -1), "kthread_mutex_dealloc(%d) fail, i=%d", mutex[i], i);
 +  }
++  #endif
 +
 +  printf(1, "%s test PASS!\n", __FUNCTION__);
 +}
 +
 +int main(){
-+  sanity(MAX_MUTEXES);
++  int count = MAX_MUTEXES;
++#if defined(_sync_print)
++  count = count - 5; // because other procs are using mutexes for their prints
++#endif
++  printf(1, "main calling sanity with %d\n", count);
++  sanity(count);
++  
 +  stressTest1(15);
 +  mutexYieldTest();
 +  stressTest2Fail(15);
@@ -1315,7 +1368,7 @@ index 9972b45..2ab4923 100644
 +  #endif
  }
 diff --git a/proc.c b/proc.c
-index a642f5a..d8159d7 100644
+index a642f5a..26c8eb1 100644
 --- a/proc.c
 +++ b/proc.c
 @@ -6,15 +6,22 @@
@@ -1800,7 +1853,7 @@ index a642f5a..d8159d7 100644
    char *state;
    uint pc[10];
    
-@@ -455,11 +556,342 @@ procdump(void)
+@@ -455,11 +556,424 @@ procdump(void)
      else
        state = "???";
      cprintf("%d %s %s", p->pid, state, p->name);
@@ -2008,8 +2061,8 @@ index a642f5a..d8159d7 100644
 +			break;
 +		}
 +	}
-+	
-+	if (mutex->state == MU_LOCKED || mutex->state == MU_FREE){
++
++	if (mutex->state != MU_UNLOCKED){
 +		release(&mutable.lock);
 +		return -1;
 +	}
@@ -2055,14 +2108,14 @@ index a642f5a..d8159d7 100644
 +
 +	mutex->state = MU_LOCKED;
 +	release(&mutable.lock);
-+	
++
 +	return 0;
 +}
 +
 +int
 +kthread_mutex_unlock1(int mutex_id){
 +	struct kthread_mutex_t *mutex;
-+	struct mu_block oneBlock;
++	void *oneBlockChan;
 +	int i;
 +
 +	if (!checkRange(mutex_id)){
@@ -2079,12 +2132,13 @@ index a642f5a..d8159d7 100644
 +		return -1;
 +	}
 +	
-+	oneBlock = mutex->waitingLine[0];
++	oneBlockChan = mutex->waitingLine[0].chan;
 +	for (i = 1; i < MUTEX_WAITING_SIZE; i++){
-+		mutex->waitingLine[i-1] = mutex->waitingLine[i];
++		mutex->waitingLine[i-1].thread = mutex->waitingLine[i].thread;
++		mutex->waitingLine[i-1].chan = mutex->waitingLine[i].chan;
 +	}
-+	mutex->waitingLine[MUTEX_WAITING_SIZE-1] = oneBlock;
-+	oneBlock.thread = 0;
++	mutex->waitingLine[MUTEX_WAITING_SIZE-1].thread = 0;
++	mutex->waitingLine[MUTEX_WAITING_SIZE-1].chan = oneBlockChan;
 +	
 +	if (mutex->waitingLine[0].thread == 0){
 +		mutex->state = MU_UNLOCKED;
@@ -2134,7 +2188,13 @@ index a642f5a..d8159d7 100644
 +			break;
 +		}
 +	}
-+
++	
++	if (mutex2->state == MU_FREE){
++		release(&mutable.lock);
++		return -1;
++	}
++	
++	
 +	kthread_mutex_unlock1(mutex2->id);
 +	
 +	if (mutex2->waitingLine[0].thread == 0){
@@ -2143,10 +2203,86 @@ index a642f5a..d8159d7 100644
 +	else{
 +		mutex1->waitingLine[0].thread = mutex2->waitingLine[0].thread;
 +	}
-+	
++
 +	release(&mutable.lock);
 +	return 0;
 +}
++
++/* helper systemcalls */
++void
++top(void){
++	struct proc *p;
++	struct thread *t;
++
++	acquire(&ptable.lock);
++
++	for (p = ptable.proc; p < &ptable.proc[NPROC]; p++){
++		if (p->state != RUNNABLE){
++			continue;
++		}
++		cprintf("proc %d(%s):\n", p->pid, p->name);
++		for(t = p->threads; t < &p->threads[NTHREAD]; t++){
++			if (t->state == T_FREE){
++				continue;
++			}
++			switch(t->state){
++				case T_RUNNING:
++				cprintf("	thread %d: RUNNING\n", t->tid);
++				break;
++				case T_RUNNABLE:
++				cprintf("	thread %d: RUNNABLE\n", t->tid);
++				break;
++				case T_SLEEPING:
++				cprintf("	thread %d: SLEEPING\n", t->tid);
++				break;
++				case T_ZOMBIE:
++				cprintf("	thread %d: ZOMBIE\n", t->tid);
++				break;
++				default:
++				cprintf("	thread %d: WUT?!\n", t->tid);
++			}
++		}
++	}
++	
++	release(&ptable.lock);
++}
++
++void
++mu_top(void){
++	struct kthread_mutex_t *mutex;
++	struct mu_block *oneBlock;
++	struct thread *thread;
++	
++	acquire(&mutable.lock);
++
++	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[MAX_MUTEXES]; mutex++){
++		if (mutex->state != MU_FREE){
++			cprintf("mutex %d: ", mutex->id);
++			if (mutex->state == MU_UNLOCKED){
++				cprintf("UNLOCKED\n");
++				continue;
++			}
++			thread = mutex->waitingLine[0].thread;
++			if (thread == 0){
++				cprintf("LOCKED with thread==0! Something went wrong! unlocking mutex\n");
++				kthread_mutex_unlock1(mutex->id);
++				continue;
++			}
++			cprintf("LOCKED by thread %d in proc %d(%s):\n", thread->tid, thread->parent->pid, thread->parent->name);
++			cprintf("	");
++			for (oneBlock = mutex->waitingLine; oneBlock < &mutex->waitingLine[MUTEX_WAITING_SIZE]; oneBlock++){
++				if (oneBlock->thread == 0){
++					break;
++				}
++				cprintf("thread %d; ", oneBlock->thread->tid);
++			}
++			cprintf("\n");
++		}
++	}
++	
++	release(&mutable.lock);
++}
+\ No newline at end of file
 diff --git a/proc.h b/proc.h
 index 3b9c3ac..e148d93 100644
 --- a/proc.h
@@ -2243,12 +2379,31 @@ index 3b9c3ac..e148d93 100644
  // Process memory is laid out contiguously, low addresses first:
  //   text
  //   original data and bss
+diff --git a/sh.c b/sh.c
+index 16e325b..1ddfdc7 100644
+--- a/sh.c
++++ b/sh.c
+@@ -165,6 +165,14 @@ main(void)
+         printf(2, "cannot cd %s\n", buf+3);
+       continue;
+     }
++	if(buf[0] == 't' && buf[1] == 'o' && buf[2] == 'p' && buf[3] == '\n'){
++      top();
++      continue;
++    }
++	if(buf[0] == 'm' && buf[1] == 'u' && buf[2] == 't' && buf[3] == 'o' && buf[4] == 'p' && buf[5] == '\n'){
++      mu_top();
++      continue;
++    }
+     if(fork1() == 0)
+       runcmd(parsecmd(buf));
+     wait();
 diff --git a/slots_hoare.c b/slots_hoare.c
 new file mode 100644
-index 0000000..1526844
+index 0000000..f15aced
 --- /dev/null
 +++ b/slots_hoare.c
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,129 @@
 +#include "types.h"
 +#include "stat.h"
 +#include "user.h"
@@ -2268,7 +2423,7 @@ index 0000000..1526844
 +	printf(1, "Student %d says: good morning!\n", id);
 +	
 +	hoare_slots_monitor_takeslot(monitor);
-+	//printf(1, "Student %d says: slots left: %d\n", id, monitor->count);
++	printf(1, "Student %d says: slots left: %d\n", id, monitor->count);
 +
 +	printf(1, "Student %d says: bye bye!\n", id);
 +	
@@ -2283,7 +2438,7 @@ index 0000000..1526844
 +	printf(1, "Grader %d says: I hate this job!\n", id);
 +	
 +	while (hoare_slots_monitor_addslots(monitor, slotsPerRound) > -1){
-+		//printf(1, "Grader %d says: slots left: %d\n", id, monitor->count);
++		printf(1, "Grader %d says: slots left: %d\n", id, monitor->count);
 +	}
 +	
 +	printf(1, "Grader %d says: fuck you BGU!\n", id);
@@ -2353,16 +2508,19 @@ index 0000000..1526844
 +	printf(1, "main- killing grader\n");
 +	
 +	while ((res = hoare_slots_monitor_stopadding(monitor) < 0));
-+
++	
 +	printf(1, "main- waiting for grader\n");
 +	
 +	while ((res = kthread_join(graderId) < 0));
 +
 +	printf(1, "main- done!!\n");
 +	
-+	hoare_slots_monitor_dealloc(monitor);
-+
-+	printf(1, "main- exiting\n");
++	if (hoare_slots_monitor_dealloc(monitor) < 0){
++		printf(1, "main- couldn't dealloc monitor! exiting\n");
++	} else {
++		printf(1, "main- exiting\n");
++	}
++	
 +	exit();
 +
 +bad_grader_create:
@@ -2377,10 +2535,10 @@ index 0000000..1526844
 +}
 diff --git a/slots_mesa.c b/slots_mesa.c
 new file mode 100644
-index 0000000..684ff94
+index 0000000..e3cdfbc
 --- /dev/null
 +++ b/slots_mesa.c
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,129 @@
 +#include "types.h"
 +#include "stat.h"
 +#include "user.h"
@@ -2492,9 +2650,12 @@ index 0000000..684ff94
 +
 +	printf(1, "main- done!!\n");
 +	
-+	mesa_slots_monitor_dealloc(monitor);
-+
-+	printf(1, "main- exiting\n");
++	if (mesa_slots_monitor_dealloc(monitor) < 0){
++		printf(1, "main- couldn't dealloc monitor! exiting\n");
++	} else {
++		printf(1, "main- exiting\n");
++	}
++	
 +	exit();
 +
 +bad_grader_create:
@@ -2525,7 +2686,7 @@ index fdda016..52fdacb 100644
 +#endif
 \ No newline at end of file
 diff --git a/syscall.c b/syscall.c
-index 799ebc2..bafaf68 100644
+index 799ebc2..c60bfc1 100644
 --- a/syscall.c
 +++ b/syscall.c
 @@ -17,7 +17,7 @@
@@ -2568,10 +2729,12 @@ index 799ebc2..bafaf68 100644
      return -1;
    *pp = (char*)i;
    return 0;
-@@ -98,29 +98,47 @@ extern int sys_unlink(void);
+@@ -98,29 +98,51 @@ extern int sys_unlink(void);
  extern int sys_wait(void);
  extern int sys_write(void);
  extern int sys_uptime(void);
++extern int sys_top(void);
++extern int sys_mu_top(void);
 +extern int sys_kthread_create(void);
 +extern int sys_kthread_id(void);
 +extern int sys_kthread_exit(void);
@@ -2634,10 +2797,12 @@ index 799ebc2..bafaf68 100644
 +[SYS_kthread_mutex_lock]      		  sys_kthread_mutex_lock,
 +[SYS_kthread_mutex_unlock]    		  sys_kthread_mutex_unlock,
 +[SYS_kthread_mutex_yieldlock]    	  sys_kthread_mutex_yieldlock,
++[SYS_top]							  sys_top,
++[SYS_mu_top]						  sys_mu_top,
  };
  
  void
-@@ -128,12 +146,12 @@ syscall(void)
+@@ -128,12 +150,12 @@ syscall(void)
  {
    int num;
  
@@ -2655,10 +2820,10 @@ index 799ebc2..bafaf68 100644
    }
  }
 diff --git a/syscall.h b/syscall.h
-index bc5f356..b3622d6 100644
+index bc5f356..4793df2 100644
 --- a/syscall.h
 +++ b/syscall.h
-@@ -1,22 +1,31 @@
+@@ -1,22 +1,34 @@
  // System call numbers
 -#define SYS_fork    1
 -#define SYS_exit    2
@@ -2711,7 +2876,9 @@ index bc5f356..b3622d6 100644
 +#define SYS_kthread_mutex_lock		28
 +#define SYS_kthread_mutex_unlock	29
 +#define SYS_kthread_mutex_yieldlock 30
-\ No newline at end of file
++#define SYS_top						31
++#define SYS_mu_top					32
++
 diff --git a/sysfile.c b/sysfile.c
 index 2209f6e..948b6cc 100644
 --- a/sysfile.c
@@ -2794,7 +2961,7 @@ index 2209f6e..948b6cc 100644
      fileclose(wf);
      return -1;
 diff --git a/sysproc.c b/sysproc.c
-index 027a5e5..965a295 100644
+index 027a5e5..82c1b2a 100644
 --- a/sysproc.c
 +++ b/sysproc.c
 @@ -6,6 +6,7 @@
@@ -2844,7 +3011,7 @@ index 027a5e5..965a295 100644
        release(&tickslock);
        return -1;
      }
-@@ -89,3 +93,101 @@ sys_uptime(void)
+@@ -89,3 +93,115 @@ sys_uptime(void)
    release(&tickslock);
    return xticks;
  }
@@ -2946,6 +3113,20 @@ index 027a5e5..965a295 100644
 +
 +  return kthread_mutex_yieldlock(id1, id2);
 +}
++
++int
++sys_top(void)
++{
++  top();
++  return 0;
++}
++
++int
++sys_mu_top(void)
++{
++  mu_top();
++  return 0;
++}
 diff --git a/trap.c b/trap.c
 index 3f80145..1f6758a 100644
 --- a/trap.c
@@ -3033,6 +3214,19 @@ index 3f80145..1f6758a 100644
 +    kthread_exit();
 +  }
  }
+diff --git a/user.h b/user.h
+index f45b8d5..e751998 100644
+--- a/user.h
++++ b/user.h
+@@ -23,6 +23,8 @@ int getpid(void);
+ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
++int top(void);
++int mu_top(void);
+ 
+ // ulib.c
+ int stat(char*, struct stat*);
 diff --git a/usertests.c b/usertests.c
 index 22a7bfb..0687690 100644
 --- a/usertests.c
@@ -3073,10 +3267,10 @@ index 22a7bfb..0687690 100644
    preempt();
    exitwait();
 diff --git a/usys.S b/usys.S
-index 8bfd8a1..c165205 100644
+index 8bfd8a1..9aff952 100644
 --- a/usys.S
 +++ b/usys.S
-@@ -29,3 +29,12 @@ SYSCALL(getpid)
+@@ -29,3 +29,14 @@ SYSCALL(getpid)
  SYSCALL(sbrk)
  SYSCALL(sleep)
  SYSCALL(uptime)
@@ -3089,6 +3283,8 @@ index 8bfd8a1..c165205 100644
 +SYSCALL(kthread_mutex_lock)
 +SYSCALL(kthread_mutex_unlock)
 +SYSCALL(kthread_mutex_yieldlock)
++SYSCALL(top)
++SYSCALL(mu_top)
 diff --git a/vm.c b/vm.c
 index 5326d14..f59de06 100644
 --- a/vm.c

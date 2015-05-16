@@ -43,14 +43,13 @@ int
 mesa_slots_monitor_dealloc(mesa_slots_monitor_t* monitor){
 	int a,b,c;
 	
-	a = ((kthread_mutex_dealloc(monitor->mutex_id)) < 0);
-	b = ((mesa_cond_dealloc(monitor->hasElements)) < 0);
-	c = ((mesa_cond_dealloc(monitor->empty)) < 0);
-	monitor->mutex_id = 0;
-	monitor->hasElements = 0;
-	monitor->empty = 0;
+	kthread_mutex_unlock(monitor->empty->mutex_id);
+	kthread_mutex_unlock(monitor->hasElements->mutex_id);
+	a = kthread_mutex_dealloc(monitor->mutex_id);
+	b = mesa_cond_dealloc(monitor->hasElements);
+	c = mesa_cond_dealloc(monitor->empty);
 	free(monitor);
-	if (a > 0 && b > 0 && c > 0){
+	if (a >= 0 && b >= 0 && c >= 0){
 		return 0;
 	}
 	return -1;
@@ -70,6 +69,7 @@ mesa_slots_monitor_addslots(mesa_slots_monitor_t* monitor, int n){
 	}
 
 	if (monitor->doneAddingSlots){
+		kthread_mutex_unlock(monitor->mutex_id);
 		return -1;
 	}
 

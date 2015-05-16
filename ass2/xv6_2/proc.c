@@ -756,8 +756,8 @@ kthread_mutex_dealloc(int mutex_id){
 			break;
 		}
 	}
-	
-	if (mutex->state == MU_LOCKED || mutex->state == MU_FREE){
+
+	if (mutex->state != MU_UNLOCKED){
 		release(&mutable.lock);
 		return -1;
 	}
@@ -803,14 +803,14 @@ kthread_mutex_lock(int mutex_id){
 
 	mutex->state = MU_LOCKED;
 	release(&mutable.lock);
-	
+
 	return 0;
 }
 
 int
 kthread_mutex_unlock1(int mutex_id){
 	struct kthread_mutex_t *mutex;
-	struct mu_block oneBlock;
+	void *oneBlockChan;
 	int i;
 
 	if (!checkRange(mutex_id)){
@@ -827,12 +827,13 @@ kthread_mutex_unlock1(int mutex_id){
 		return -1;
 	}
 	
-	oneBlock = mutex->waitingLine[0];
+	oneBlockChan = mutex->waitingLine[0].chan;
 	for (i = 1; i < MUTEX_WAITING_SIZE; i++){
-		mutex->waitingLine[i-1] = mutex->waitingLine[i];
+		mutex->waitingLine[i-1].thread = mutex->waitingLine[i].thread;
+		mutex->waitingLine[i-1].chan = mutex->waitingLine[i].chan;
 	}
-	mutex->waitingLine[MUTEX_WAITING_SIZE-1] = oneBlock;
-	oneBlock.thread = 0;
+	mutex->waitingLine[MUTEX_WAITING_SIZE-1].thread = 0;
+	mutex->waitingLine[MUTEX_WAITING_SIZE-1].chan = oneBlockChan;
 	
 	if (mutex->waitingLine[0].thread == 0){
 		mutex->state = MU_UNLOCKED;
@@ -882,7 +883,13 @@ kthread_mutex_yieldlock(int mutex_id1, int mutex_id2){
 			break;
 		}
 	}
-
+	
+	if (mutex2->state == MU_FREE){
+		release(&mutable.lock);
+		return -1;
+	}
+	
+	
 	kthread_mutex_unlock1(mutex2->id);
 	
 	if (mutex2->waitingLine[0].thread == 0){
@@ -891,7 +898,82 @@ kthread_mutex_yieldlock(int mutex_id1, int mutex_id2){
 	else{
 		mutex1->waitingLine[0].thread = mutex2->waitingLine[0].thread;
 	}
-	
+
 	release(&mutable.lock);
 	return 0;
+}
+
+/* helper systemcalls */
+void
+top(void){
+	struct proc *p;
+	struct thread *t;
+
+	acquire(&ptable.lock);
+
+	for (p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+		if (p->state != RUNNABLE){
+			continue;
+		}
+		cprintf("proc %d(%s):\n", p->pid, p->name);
+		for(t = p->threads; t < &p->threads[NTHREAD]; t++){
+			if (t->state == T_FREE){
+				continue;
+			}
+			switch(t->state){
+				case T_RUNNING:
+				cprintf("	thread %d: RUNNING\n", t->tid);
+				break;
+				case T_RUNNABLE:
+				cprintf("	thread %d: RUNNABLE\n", t->tid);
+				break;
+				case T_SLEEPING:
+				cprintf("	thread %d: SLEEPING\n", t->tid);
+				break;
+				case T_ZOMBIE:
+				cprintf("	thread %d: ZOMBIE\n", t->tid);
+				break;
+				default:
+				cprintf("	thread %d: WUT?!\n", t->tid);
+			}
+		}
+	}
+	
+	release(&ptable.lock);
+}
+
+void
+mu_top(void){
+	struct kthread_mutex_t *mutex;
+	struct mu_block *oneBlock;
+	struct thread *thread;
+	
+	acquire(&mutable.lock);
+
+	for (mutex = mutable.mutexes; mutex < &mutable.mutexes[MAX_MUTEXES]; mutex++){
+		if (mutex->state != MU_FREE){
+			cprintf("mutex %d: ", mutex->id);
+			if (mutex->state == MU_UNLOCKED){
+				cprintf("UNLOCKED\n");
+				continue;
+			}
+			thread = mutex->waitingLine[0].thread;
+			if (thread == 0){
+				cprintf("LOCKED with thread==0! Something went wrong! unlocking mutex\n");
+				kthread_mutex_unlock1(mutex->id);
+				continue;
+			}
+			cprintf("LOCKED by thread %d in proc %d(%s):\n", thread->tid, thread->parent->pid, thread->parent->name);
+			cprintf("	");
+			for (oneBlock = mutex->waitingLine; oneBlock < &mutex->waitingLine[MUTEX_WAITING_SIZE]; oneBlock++){
+				if (oneBlock->thread == 0){
+					break;
+				}
+				cprintf("thread %d; ", oneBlock->thread->tid);
+			}
+			cprintf("\n");
+		}
+	}
+	
+	release(&mutable.lock);
 }

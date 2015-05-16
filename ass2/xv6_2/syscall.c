@@ -98,6 +98,8 @@ extern int sys_unlink(void);
 extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
+extern int sys_top(void);
+extern int sys_mu_top(void);
 extern int sys_kthread_create(void);
 extern int sys_kthread_id(void);
 extern int sys_kthread_exit(void);
@@ -139,6 +141,8 @@ static int (*syscalls[])(void) = {
 [SYS_kthread_mutex_lock]      		  sys_kthread_mutex_lock,
 [SYS_kthread_mutex_unlock]    		  sys_kthread_mutex_unlock,
 [SYS_kthread_mutex_yieldlock]    	  sys_kthread_mutex_yieldlock,
+[SYS_top]							  sys_top,
+[SYS_mu_top]						  sys_mu_top,
 };
 
 void

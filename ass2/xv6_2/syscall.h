@@ -29,3 +29,6 @@
 #define SYS_kthread_mutex_lock		28
 #define SYS_kthread_mutex_unlock	29
 #define SYS_kthread_mutex_yieldlock 30
+#define SYS_top						31
+#define SYS_mu_top					32
+

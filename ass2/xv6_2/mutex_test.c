@@ -299,6 +299,8 @@ void sanity(int count){
     }
   }
 
+  #ifndef _sync_print
+  /* if print is defined, this part fucks up quite a bit */
   /* chack that mutexes are really limited by MAX_MUTEXES */
   for (i=0 ; i<MAX_MUTEXES ; i++){
     mutex[i] = kthread_mutex_alloc();
@@ -311,12 +313,19 @@ void sanity(int count){
   for (i=0 ; i< MAX_MUTEXES ; i++){
     ASSERT((kthread_mutex_dealloc(mutex[i]) == -1), "kthread_mutex_dealloc(%d) fail, i=%d", mutex[i], i);
   }
+  #endif
 
   printf(1, "%s test PASS!\n", __FUNCTION__);
 }
 
 int main(){
-  sanity(MAX_MUTEXES);
+  int count = MAX_MUTEXES;
+#if defined(_sync_print)
+  count = count - 5; // because other procs are using mutexes for their prints
+#endif
+  printf(1, "main calling sanity with %d\n", count);
+  sanity(count);
+  
   stressTest1(15);
   mutexYieldTest();
   stressTest2Fail(15);

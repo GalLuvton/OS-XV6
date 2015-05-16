@@ -1,5 +1,5 @@
 diff --git a/Makefile b/Makefile
-index c94c71d..1484148 100644
+index c94c71d..cc84836 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -69,6 +69,11 @@ QEMU = $(shell if which qemu > /dev/null; \
@@ -34,7 +34,7 @@ index c94c71d..1484148 100644
  
  _%: %.o $(ULIB)
  	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
-@@ -165,7 +174,11 @@ UPROGS=\
+@@ -165,13 +174,18 @@ UPROGS=\
  	_kill\
  	_ln\
  	_ls\
@@ -42,10 +42,32 @@ index c94c71d..1484148 100644
 +	_slots_mesa\
  	_mkdir\
 +	_mutex_test\
-+	_play\
  	_rm\
  	_sh\
- 	_stressfs\
+-	_stressfs\
+-	_usertests\
+ 	_wc\
+ 	_zombie\
++	
++# _play\
++# _stressfs\
++# _usertests\
+ 
+ fs.img: mkfs README $(UPROGS)
+ 	./mkfs fs.img README $(UPROGS)
+@@ -194,9 +208,10 @@ QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
+ 	then echo "-gdb tcp::$(GDBPORT)"; \
+ 	else echo "-s -p $(GDBPORT)"; fi)
+ ifndef CPUS
+-CPUS := 1
++CPUS := 2
+ endif
+-QEMUOPTS = -hdb fs.img xv6.img -smp $(CPUS) -m 512 $(QEMUEXTRA)
++# QEMUOPTS = -hdb fs.img xv6.img -smp $(CPUS) -m 512 $(QEMUEXTRA)
++QEMUOPTS = -hdb fs.img xv6.img --enable-kvm -smp $(CPUS) -m 512 $(QEMUEXTRA)
+ 
+ qemu: fs.img xv6.img
+ 	$(QEMU) -serial mon:stdio $(QEMUOPTS)
 diff --git a/badplay.c b/badplay.c
 new file mode 100644
 index 0000000..b229b4b

@@ -14,6 +14,8 @@ hoare_cond_t* hoare_cond_alloc(){
 		return 0;
 	}
 	
+	kthread_mutex_lock(mu_id1);
+	
 	condition = (hoare_cond_t*)malloc(sizeof(hoare_cond_t));
 	condition->mutex_id = mu_id1;
 	condition->internalLock = mu_id2;
@@ -22,6 +24,8 @@ hoare_cond_t* hoare_cond_alloc(){
 }
 
 int hoare_cond_dealloc(hoare_cond_t* cond){
+	kthread_mutex_unlock(cond->mutex_id);
+
 	if (kthread_mutex_dealloc(cond->mutex_id) < 0){
 		return -1;
 	}

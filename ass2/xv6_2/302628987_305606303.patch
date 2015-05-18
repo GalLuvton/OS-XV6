@@ -434,10 +434,10 @@ index 1803cb4..632d565 100644
      ilock(ip);
 diff --git a/hoare_cond.c b/hoare_cond.c
 new file mode 100644
-index 0000000..c9bfeaa
+index 0000000..250316e
 --- /dev/null
 +++ b/hoare_cond.c
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,73 @@
 +#include "hoare_cond.h"
 +
 +hoare_cond_t* hoare_cond_alloc(){
@@ -454,6 +454,8 @@ index 0000000..c9bfeaa
 +		return 0;
 +	}
 +	
++	kthread_mutex_lock(mu_id1);
++	
 +	condition = (hoare_cond_t*)malloc(sizeof(hoare_cond_t));
 +	condition->mutex_id = mu_id1;
 +	condition->internalLock = mu_id2;
@@ -462,6 +464,8 @@ index 0000000..c9bfeaa
 +}
 +
 +int hoare_cond_dealloc(hoare_cond_t* cond){
++	kthread_mutex_unlock(cond->mutex_id);
++
 +	if (kthread_mutex_dealloc(cond->mutex_id) < 0){
 +		return -1;
 +	}
@@ -529,10 +533,10 @@ index 1f779d6..5763964 100644
  hoare_cond_t* hoare_cond_alloc();
 diff --git a/hoare_slots_monitor.c b/hoare_slots_monitor.c
 new file mode 100644
-index 0000000..17a9794
+index 0000000..adb0521
 --- /dev/null
 +++ b/hoare_slots_monitor.c
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,103 @@
 +#include "hoare_slots_monitor.h"
 +
 +hoare_slots_monitor_t*
@@ -553,8 +557,6 @@ index 0000000..17a9794
 +		hoare_cond_dealloc(monitor->empty);
 +		return 0;
 +	}
-+	kthread_mutex_lock(monitor->empty->mutex_id);
-+	kthread_mutex_lock(monitor->hasElements->mutex_id);
 +	
 +	monitor->count = 0;
 +	monitor->doneAddingSlots = 0;
@@ -564,9 +566,7 @@ index 0000000..17a9794
 +int
 +hoare_slots_monitor_dealloc(hoare_slots_monitor_t* monitor){
 +	int a,b,c;
-+	
-+	kthread_mutex_unlock(monitor->empty->mutex_id);
-+	kthread_mutex_unlock(monitor->hasElements->mutex_id);
++
 +	a = kthread_mutex_dealloc(monitor->mutex_id);
 +	b = hoare_cond_dealloc(monitor->hasElements);
 +	c = hoare_cond_dealloc(monitor->empty);
@@ -687,10 +687,10 @@ index 8a73c0f..8ff1298 100644
    fileinit();      // file table
 diff --git a/mesa_cond.c b/mesa_cond.c
 new file mode 100644
-index 0000000..835c359
+index 0000000..a002cb0
 --- /dev/null
 +++ b/mesa_cond.c
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,64 @@
 +#include "mesa_cond.h"
 +
 +mesa_cond_t* mesa_cond_alloc(){
@@ -707,6 +707,8 @@ index 0000000..835c359
 +		return 0;
 +	}
 +	
++	kthread_mutex_lock(mu_id1);
++	
 +	condition = (mesa_cond_t*)malloc(sizeof(mesa_cond_t));
 +	condition->mutex_id = mu_id1;
 +	condition->internalLock = mu_id2;
@@ -715,6 +717,8 @@ index 0000000..835c359
 +}
 +
 +int mesa_cond_dealloc(mesa_cond_t* cond){
++	kthread_mutex_unlock(cond->mutex_id);
++
 +	if (kthread_mutex_dealloc(cond->mutex_id) < 0){
 +		return -1;
 +	}
@@ -773,10 +777,10 @@ index 9ef7bc7..3cc802e 100644
  mesa_cond_t* mesa_cond_alloc();
 diff --git a/mesa_slots_monitor.c b/mesa_slots_monitor.c
 new file mode 100644
-index 0000000..9a6405e
+index 0000000..f27fa43
 --- /dev/null
 +++ b/mesa_slots_monitor.c
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,108 @@
 +#include "mesa_slots_monitor.h"
 +
 +mesa_slots_monitor_t*
@@ -797,21 +801,6 @@ index 0000000..9a6405e
 +		mesa_cond_dealloc(monitor->hasElements);
 +		return 0;
 +	}
-+
-+	if ((kthread_mutex_lock(monitor->empty->mutex_id)) < 0){
-+		kthread_mutex_dealloc(monitor->mutex_id);
-+		mesa_cond_dealloc(monitor->hasElements);
-+		mesa_cond_dealloc(monitor->empty);
-+		return 0;
-+	}
-+	
-+	if ((kthread_mutex_lock(monitor->hasElements->mutex_id)) < 0){
-+		kthread_mutex_dealloc(monitor->mutex_id);
-+		kthread_mutex_unlock(monitor->empty->mutex_id);
-+		mesa_cond_dealloc(monitor->hasElements);
-+		mesa_cond_dealloc(monitor->empty);
-+		return 0;
-+	}
 +	
 +	monitor->count = 0;
 +	monitor->doneAddingSlots= 0;
@@ -821,9 +810,7 @@ index 0000000..9a6405e
 +int
 +mesa_slots_monitor_dealloc(mesa_slots_monitor_t* monitor){
 +	int a,b,c;
-+	
-+	kthread_mutex_unlock(monitor->empty->mutex_id);
-+	kthread_mutex_unlock(monitor->hasElements->mutex_id);
++
 +	a = kthread_mutex_dealloc(monitor->mutex_id);
 +	b = mesa_cond_dealloc(monitor->hasElements);
 +	c = mesa_cond_dealloc(monitor->empty);

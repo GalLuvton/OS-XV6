@@ -18,8 +18,6 @@ hoare_slots_monitor_alloc(){
 		hoare_cond_dealloc(monitor->empty);
 		return 0;
 	}
-	kthread_mutex_lock(monitor->empty->mutex_id);
-	kthread_mutex_lock(monitor->hasElements->mutex_id);
 	
 	monitor->count = 0;
 	monitor->doneAddingSlots = 0;
@@ -29,9 +27,7 @@ hoare_slots_monitor_alloc(){
 int
 hoare_slots_monitor_dealloc(hoare_slots_monitor_t* monitor){
 	int a,b,c;
-	
-	kthread_mutex_unlock(monitor->empty->mutex_id);
-	kthread_mutex_unlock(monitor->hasElements->mutex_id);
+
 	a = kthread_mutex_dealloc(monitor->mutex_id);
 	b = hoare_cond_dealloc(monitor->hasElements);
 	c = hoare_cond_dealloc(monitor->empty);

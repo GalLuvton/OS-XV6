@@ -14,6 +14,8 @@ mesa_cond_t* mesa_cond_alloc(){
 		return 0;
 	}
 	
+	kthread_mutex_lock(mu_id1);
+	
 	condition = (mesa_cond_t*)malloc(sizeof(mesa_cond_t));
 	condition->mutex_id = mu_id1;
 	condition->internalLock = mu_id2;
@@ -22,6 +24,8 @@ mesa_cond_t* mesa_cond_alloc(){
 }
 
 int mesa_cond_dealloc(mesa_cond_t* cond){
+	kthread_mutex_unlock(cond->mutex_id);
+
 	if (kthread_mutex_dealloc(cond->mutex_id) < 0){
 		return -1;
 	}

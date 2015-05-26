@@ -318,9 +318,13 @@ copyuvm(pde_t *pgdir, uint sz)
     return 0;
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
-      panic("copyuvm: pte should exist");
+      // Lazy page allocation
+	  // pte should exist only if i refered to a page that was accessed after being assigned
+	  continue;
     if(!(*pte & PTE_P))
-      panic("copyuvm: page not present");
+      // Lazy page allocation
+	  // page should only exist only if i refered to a page that was accessed after being assigned
+	  continue;
     pa = PTE_ADDR(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)

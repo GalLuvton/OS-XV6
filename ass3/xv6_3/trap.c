@@ -45,6 +45,21 @@ trap(struct trapframe *tf)
       exit();
     return;
   }
+  
+  // Lazy page allocation
+  if(tf->trapno == T_PGFLT){
+    char * newPg;
+    newPg = kalloc();
+    if(newPg == 0){
+      cprintf("out of memory while lazy allocing\n");
+      return ;
+    }
+    memset(newPg, 0, PGSIZE);
+
+    uint page = PGROUNDDOWN(rcr2());
+    mappages(proc->pgdir, (char*) page, PGSIZE, v2p(newPg), PTE_W | PTE_U);
+    return ;
+  }
 
   switch(tf->trapno){
   case T_IRQ0 + IRQ_TIMER:

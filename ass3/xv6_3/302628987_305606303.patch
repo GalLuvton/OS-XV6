@@ -1,0 +1,400 @@
+diff --git a/Makefile b/Makefile
+index c94c71d..034be3d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -172,6 +172,8 @@ UPROGS=\
+ 	_usertests\
+ 	_wc\
+ 	_zombie\
++	_play\
++	_task3tests\
+ 
+ fs.img: mkfs README $(UPROGS)
+ 	./mkfs fs.img README $(UPROGS)
+diff --git a/defs.h b/defs.h
+index 24b77af..0e762b8 100644
+--- a/defs.h
++++ b/defs.h
+@@ -9,6 +9,7 @@ struct rtcdate;
+ struct spinlock;
+ struct stat;
+ struct superblock;
++struct trapframe;
+ 
+ // bio.c
+ void            binit(void);
+@@ -179,7 +180,8 @@ void            switchuvm(struct proc*);
+ void            switchkvm(struct cpu*);
+ int             copyout(pde_t*, uint, void*, uint);
+ void            clearpteu(pde_t *, char *);
+-int		mappages(pde_t *, void *, uint, uint, int);
++void			trappgflt(struct cpu*, struct proc*, struct trapframe*);
++int				mappages(pde_t *, void *, uint, uint, int);
+ 
+ 
+ // number of elements in fixed-size array
+diff --git a/play.c b/play.c
+new file mode 100644
+index 0000000..811c56b
+--- /dev/null
++++ b/play.c
+@@ -0,0 +1,25 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++
++int
++main(int argc, char *argv[])
++{
++	int pid;
++	
++	printf(1, "main starting\n");
++	
++	if ((pid = fork()) > 0){
++		int i = 6;
++		i++;
++		exit();
++	}
++	else {
++		wait();
++	}
++	
++	printf(1, "main exiting\n");
++	
++	exit();
++}
++
+diff --git a/proc.h b/proc.h
+index 1cd2e7c..ca2a76f 100644
+--- a/proc.h
++++ b/proc.h
+@@ -1,6 +1,12 @@
+ // Segments in proc->gdt.
+ #define NSEGS     7
+ 
++struct TLB {
++    uint address[2]; // the addresses in the TLB
++    int set[2]; // is the current cell is the array holding a valid address?
++};
++
++
+ // Per-CPU state
+ struct cpu {
+   uchar id;                    // Local APIC ID; index into cpus[] below
+@@ -11,6 +17,7 @@ struct cpu {
+   volatile uint started;       // Has the CPU started?
+   int ncli;                    // Depth of pushcli nesting.
+   int intena;                  // Were interrupts enabled before pushcli?
++  struct TLB TLB;
+   
+   // Cpu-local storage variables; see below
+   struct cpu *cpu;
+diff --git a/sysproc.c b/sysproc.c
+index 027a5e5..6d633b1 100644
+--- a/sysproc.c
++++ b/sysproc.c
+@@ -51,8 +51,16 @@ sys_sbrk(void)
+   if(argint(0, &n) < 0)
+     return -1;
+   addr = proc->sz;
+-  if(growproc(n) < 0)
+-    return -1;
++  if (n > 0){
++	if (addr + n >= KERNBASE){
++	  return -1;
++	}
++	proc->sz += n;
++  } else {
++    if(growproc(n) < 0){
++	  return -1;
++    }
++  }
+   return addr;
+ }
+ 
+diff --git a/task3tests.c b/task3tests.c
+new file mode 100644
+index 0000000..f4850bf
+--- /dev/null
++++ b/task3tests.c
+@@ -0,0 +1,89 @@
++#include "param.h"
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++#include "syscall.h"
++#include "memlayout.h"
++
++#define PAGE_SIZE 4096
++#define INFINITY_AND_BEYOND 100000
++
++void
++stackOverflow(){
++	stackOverflow();
++}
++
++void
++allocToTheMoon(){
++	char* addr;
++	
++	printf(1, "testing allocToTheMoon\n");
++	if (fork() == 0){
++		addr = (char*)2;
++		while (addr > 0){
++			addr = malloc(PAGE_SIZE*INFINITY_AND_BEYOND);
++		}
++		exit();
++	}
++	wait();
++	printf(1, "allocToTheMoon ok!\n");
++}
++
++void
++hugeAlloc(){
++	char* addr;
++	
++	printf(1, "testing hugeAlloc\n");
++	addr = malloc(PAGE_SIZE*100);
++	*addr = 'a';
++	*(addr + 60) = 'b';
++	*(addr + 7000) = 'c';
++	
++	printf(1, "*addr = %d\n", *addr);
++	printf(1, "*(addr + 50) = %d\n", *(addr + 50));
++	printf(1, "*(addr + 6666) = %d\n", *(addr + 6666));
++	free(addr);
++	printf(1, "hugeAlloc ok!\n");
++}
++
++void
++invalidMemAccess(){
++	char* a;
++	
++	printf(1, "testing invalidMemAccess\n");
++	if (fork() == 0){
++		for(a = (char*)(KERNBASE); a < (char*) (KERNBASE+2000000); a += 50000){
++			printf(1, "oops could read %x = %x\n", a, *a);
++			exit();
++		}
++	}
++	wait();
++	printf(1, "invalidMemAccess ok!\n");
++}
++
++void
++overflow(){
++	printf(1, "testing overflow\n");
++	if (fork() == 0){
++		stackOverflow();
++	}
++	wait();
++	printf(1, "overflow ok!\n");
++}
++
++
++int
++main(int argc, char *argv[])
++{
++	printf(1, "task3tests starting\n");
++	
++	invalidMemAccess();
++	overflow();
++	allocToTheMoon();
++	hugeAlloc();
++	
++	printf(1, "task3tests exiting\n");
++	
++	exit();
++}
++
+diff --git a/trap.c b/trap.c
+index 3f80145..934d4d0 100644
+--- a/trap.c
++++ b/trap.c
+@@ -14,6 +14,7 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
+ struct spinlock tickslock;
+ uint ticks;
+ 
++
+ void
+ tvinit(void)
+ {
+@@ -45,6 +46,11 @@ trap(struct trapframe *tf)
+       exit();
+     return;
+   }
++  
++  if (tf->trapno == T_PGFLT){  
++	trappgflt(cpu, proc, tf);
++	return;
++  }
+ 
+   switch(tf->trapno){
+   case T_IRQ0 + IRQ_TIMER:
+diff --git a/vm.c b/vm.c
+index ef5a27f..81dd806 100644
+--- a/vm.c
++++ b/vm.c
+@@ -10,6 +10,11 @@
+ extern char data[];  // defined by kernel.ld
+ struct segdesc gdt[NSEGS];
+ 
++// forward decelerations
++static void removeAddressFromTLB(struct cpu *c, uint va);
++static void addAddressToTLB(struct cpu *c, uint va);
++
++
+ // Set up CPU's kernel segment descriptors.
+ // Run once on entry on each CPU.
+ void
+@@ -34,6 +39,11 @@ seginit(void)
+   lgdt(c->gdt, sizeof(c->gdt));
+   loadgs(SEG_KCPU << 3);
+   
++  c->TLB.address[0] = 0;
++  c->TLB.address[1] = 0;
++  c->TLB.set[0] = 0;
++  c->TLB.set[1] = 0;
++  
+   // Initialize cpu-local storage.
+   cpu = c;
+   proc = 0;
+@@ -157,7 +167,17 @@ kvmalloc(struct cpu *c)
+ void
+ switchkvm(struct cpu *c)
+ {
++  pushcli();
+   lcr3(v2p(c->kpgdir));   // switch to the kernel page table
++  if (c->TLB.set[0] != 0){
++	removeAddressFromTLB(c, c->TLB.address[0]);  
++	c->TLB.set[0] = 0;
++  }
++  if (c->TLB.set[1] != 0){
++	removeAddressFromTLB(c, c->TLB.address[1]); 
++	c->TLB.set[1] = 0;
++  }
++  popcli();  
+ }
+ 
+ // Switch TSS and h/w page table to correspond to process p.
+@@ -172,7 +192,8 @@ switchuvm(struct proc *p)
+   ltr(SEG_TSS << 3);
+   if(p->pgdir == 0)
+     panic("switchuvm: no pgdir");
+-  lcr3(v2p(p->pgdir));  // switch to new address space
++    switchkvm(cpu);
++    // lcr3(v2p(p->pgdir));  // switch to new address space
+   popcli();
+ }
+ 
+@@ -318,9 +339,13 @@ copyuvm(pde_t *pgdir, uint sz)
+     return 0;
+   for(i = 0; i < sz; i += PGSIZE){
+     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
+-      panic("copyuvm: pte should exist");
++      // Lazy page allocation
++	  // pte should exist only if i refered to a page that was accessed after being assigned
++	  continue;
+     if(!(*pte & PTE_P))
+-      panic("copyuvm: page not present");
++      // Lazy page allocation
++	  // page should only exist only if i refered to a page that was accessed after being assigned
++	  continue;
+     pa = PTE_ADDR(*pte);
+     flags = PTE_FLAGS(*pte);
+     if((mem = kalloc()) == 0)
+@@ -377,6 +402,94 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
+   return 0;
+ }
+ 
++static void
++removeAddressFromTLB(struct cpu *c, uint va){
++	pte_t *pg;
++	pde_t *pde;
++	pte_t *pgtab;
++	int isLastPage = 1;
++	
++	pde = &((c->kpgdir)[PDX(va)]);
++	pgtab = (pte_t*)p2v(PTE_ADDR(*pde));
++	pgtab[PTX(va)] = 0;
++	for (pg = pgtab; pg < &pgtab[NPTENTRIES];pg++){
++		if (*pg != 0){
++			isLastPage = 0;
++			break;
++		}
++	}
++	if (isLastPage){
++		kfree((char*) pgtab);
++		*pde = 0;
++	}
++	return;
++}
++
++static void
++addAddressToTLB(struct cpu *c, uint va){
++	if (c->TLB.set[0] == 0){
++		c->TLB.address[0] = (uint)va;  
++		c->TLB.set[0] = 1;
++	}
++	else if (c->TLB.set[1] == 0){
++		c->TLB.address[1] = (uint)va; 
++		c->TLB.set[1] = 1;				
++	}
++	else{
++		removeAddressFromTLB(c, c->TLB.address[0]);
++		c->TLB.address[0] = c->TLB.address[1];
++		c->TLB.address[1] = (uint)va;
++	}
++}
++
++void
++trappgflt(struct cpu* c, struct proc* p, struct trapframe* tf){
++	void* va = (void*)rcr2();
++	pte_t *pte_user;
++	pte_t *pte_kernel;
++
++	pte_kernel = walkpgdir(c->kpgdir, va, 0);
++	if (pte_kernel == 0 || *pte_kernel == 0){
++		// the address is not mapped in the kernel (our simulated TLB)
++		pte_user = walkpgdir(p->pgdir, va, 0);
++		if (pte_user != 0 && *pte_user != 0){
++			// the address is mapped in the user pgdir. add it to the kernel (our simulated TLB)
++			pte_kernel = walkpgdir(c->kpgdir, va, 1);
++			*pte_kernel = *pte_user;
++			addAddressToTLB(c, (uint)va);
++			return;
++		}
++		// the address is not mapped in the user pgdir. allocate a new page for it
++		if (p->sz < (uint)va){
++			// attempting to access address that is beyond the process' space
++			cprintf("address is larger then process space");
++			exit();
++		}
++
++		char * newPysicalAddress;
++		newPysicalAddress = kalloc();
++		if(newPysicalAddress == 0){
++			cprintf("system ran out of free memory\n");
++			exit();
++		}
++		
++		//cprintf("allocated lazy page\n");
++		memset(newPysicalAddress, 0, PGSIZE);
++		uint pg = PGROUNDDOWN((uint)va);
++		if (mappages(p->pgdir, (char*)pg, 1, v2p(newPysicalAddress), PTE_W | PTE_U) < 0){
++			panic("error when mapping a newly allocated page");
++		}
++		return;
++	}
++	else{
++		// should never get here
++		exit();
++	}
++
++}
++
++
++
+ //PAGEBREAK!
+ // Blank page.
+ //PAGEBREAK!

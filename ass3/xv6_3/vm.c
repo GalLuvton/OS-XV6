@@ -10,6 +10,11 @@
 extern char data[];  // defined by kernel.ld
 struct segdesc gdt[NSEGS];
 
+// forward definitions
+static void removeAddressFromTLB(struct cpu *c, uint va);
+static void addAddressToTLB(struct cpu *c, uint va);
+
+
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
 void
@@ -34,6 +39,11 @@ seginit(void)
   lgdt(c->gdt, sizeof(c->gdt));
   loadgs(SEG_KCPU << 3);
   
+  c->TLB.address[0] = 0;
+  c->TLB.address[1] = 0;
+  c->TLB.set[0] = 0;
+  c->TLB.set[1] = 0;
+  
   // Initialize cpu-local storage.
   cpu = c;
   proc = 0;
@@ -42,7 +52,7 @@ seginit(void)
 // Return the address of the PTE in page table pgdir
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page table pages.
-static pte_t *
+pte_t *
 walkpgdir(pde_t *pgdir, const void *va, int alloc)
 {
   pde_t *pde;
@@ -157,7 +167,17 @@ kvmalloc(struct cpu *c)
 void
 switchkvm(struct cpu *c)
 {
+  pushcli();
   lcr3(v2p(c->kpgdir));   // switch to the kernel page table
+  if (c->TLB.set[0] != 0){
+	removeAddressFromTLB(c, c->TLB.address[0]);  
+	c->TLB.set[0] = 0;
+  }
+  if (c->TLB.set[1] != 0){
+	removeAddressFromTLB(c, c->TLB.address[1]); 
+	c->TLB.set[1] = 0;
+  }
+  popcli();  
 }
 
 // Switch TSS and h/w page table to correspond to process p.
@@ -172,7 +192,8 @@ switchuvm(struct proc *p)
   ltr(SEG_TSS << 3);
   if(p->pgdir == 0)
     panic("switchuvm: no pgdir");
-  lcr3(v2p(p->pgdir));  // switch to new address space
+  // simulated TLB
+  //lcr3(v2p(p->pgdir));  // switch to new address space
   popcli();
 }
 
@@ -380,6 +401,96 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
   }
   return 0;
 }
+
+static void
+removeAddressFromTLB(struct cpu *c, uint va){
+	pte_t *pg;
+	pde_t *pde;
+	pte_t *pgtab;
+	int isLastPage = 1;
+	
+	pde = &((c->kpgdir)[PDX(va)]);
+	pgtab = (pte_t*)p2v(PTE_ADDR(*pde));
+	pgtab[PTX(va)] = 0;
+	for (pg = pgtab; pg < &pgtab[NPTENTRIES];pg++){
+		if (*pg != 0){
+			isLastPage = 0;
+			break;
+		}
+	}
+	if (isLastPage){
+		kfree((char*) pgtab);
+		*pde = 0;
+	}
+	return;
+}
+
+static void
+addAddressToTLB(struct cpu *c, uint va){
+	if (c->TLB.set[0] == 0){
+		c->TLB.address[0] = (uint)va;  
+		c->TLB.set[0] = 1;
+	}
+	else if (c->TLB.set[1] == 0){
+		c->TLB.address[1] = (uint)va; 
+		c->TLB.set[1] = 1;				
+	}
+	else{
+		removeAddressFromTLB(c, c->TLB.address[0]);
+		c->TLB.address[0] = c->TLB.address[1];
+		c->TLB.address[1] = (uint)va;
+	}
+}
+
+void
+trappgflt(struct cpu* c, struct proc* p, struct trapframe* tf){
+	void* va = (void*)rcr2();
+	pte_t *pte_user;
+	pte_t *pte_kernel;
+
+	pte_kernel = walkpgdir(c->kpgdir, va, 0);
+	if (pte_kernel == 0 || *pte_kernel == 0){
+		// the address is not mapped in the kernel (our simulated TLB)
+		pte_user = walkpgdir(p->pgdir, va, 0);
+		if (pte_user != 0 && *pte_user != 0){
+			// the address is mapped in the user pgdir. add it to the kernel (our simulated TLB)
+			pte_kernel = walkpgdir(c->kpgdir, va, 1);
+			*pte_kernel = *pte_user;
+			addAddressToTLB(c, (uint)va);
+			return;
+		}
+		else{
+			// the address is not mapped in the user pgdir. allocate a new page for it
+			if (p->sz < (uint)va){
+				// attempting to access address that is beyond the process' space
+				cprintf("address is larger then process space");
+				exit();
+			}
+
+			char * newPysicalAddress;
+			newPysicalAddress = kalloc();
+			if(newPysicalAddress == 0){
+			  cprintf("system ran out of free memory\n");
+			  exit();
+			}
+			
+			//cprintf("allocated lazy page\n");
+			memset(newPysicalAddress, 0, PGSIZE);
+			uint pg = PGROUNDDOWN((uint)va);
+			if (mappages(p->pgdir, (char*)pg, 1, v2p(newPysicalAddress), PTE_W | PTE_U) < 0){
+				panic("error when mapping a newly allocated page");
+			}
+			return;
+		}
+	}
+	else{
+		// should never get here
+		exit();
+	}
+
+}
+
+
 
 //PAGEBREAK!
 // Blank page.

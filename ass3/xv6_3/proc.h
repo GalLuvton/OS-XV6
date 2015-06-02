@@ -1,6 +1,12 @@
 // Segments in proc->gdt.
 #define NSEGS     7
 
+struct TLB {
+    uint address[2]; // the addresses in the TLB
+    int set[2]; // is the current cell is the array holding a valid address?
+};
+
+
 // Per-CPU state
 struct cpu {
   uchar id;                    // Local APIC ID; index into cpus[] below
@@ -11,6 +17,7 @@ struct cpu {
   volatile uint started;       // Has the CPU started?
   int ncli;                    // Depth of pushcli nesting.
   int intena;                  // Were interrupts enabled before pushcli?
+  struct TLB TLB;
   
   // Cpu-local storage variables; see below
   struct cpu *cpu;

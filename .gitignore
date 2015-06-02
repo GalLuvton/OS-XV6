@@ -1,0 +1,14 @@
+ass3/xv6_3/*.asm
+ass3/xv6_3/*.d
+ass3/xv6_3/*.o
+ass3/xv6_3/*.sym
+ass3/xv6_3/_*
+ass3/xv6_3/xv6.img
+ass3/xv6_3/bootblock
+ass3/xv6_3/entryother
+ass3/xv6_3/fs.img
+ass3/xv6_3/initcode
+ass3/xv6_3/initcode.out
+ass3/xv6_3/kernel
+ass3/xv6_3/mkfs
+ass3/xv6_3/vectors.S

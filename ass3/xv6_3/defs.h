@@ -9,6 +9,7 @@ struct rtcdate;
 struct spinlock;
 struct stat;
 struct superblock;
+struct trapframe;
 
 // bio.c
 void            binit(void);
@@ -179,7 +180,8 @@ void            switchuvm(struct proc*);
 void            switchkvm(struct cpu*);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *, char *);
-int		mappages(pde_t *, void *, uint, uint, int);
+void			trappgflt(struct cpu*, struct proc*, struct trapframe*);
+int				mappages(pde_t *, void *, uint, uint, int);
 
 
 // number of elements in fixed-size array

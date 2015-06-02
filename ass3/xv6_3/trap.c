@@ -14,6 +14,7 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
+
 void
 tvinit(void)
 {
@@ -46,19 +47,9 @@ trap(struct trapframe *tf)
     return;
   }
   
-  // Lazy page allocation
-  if(tf->trapno == T_PGFLT){
-    char * newPg;
-    newPg = kalloc();
-    if(newPg == 0){
-      cprintf("out of memory while lazy allocing\n");
-      return ;
-    }
-    memset(newPg, 0, PGSIZE);
-
-    uint page = PGROUNDDOWN(rcr2());
-    mappages(proc->pgdir, (char*) page, PGSIZE, v2p(newPg), PTE_W | PTE_U);
-    return ;
+  if (tf->trapno == T_PGFLT){  
+	trappgflt(cpu, proc, tf);
+	return;
   }
 
   switch(tf->trapno){

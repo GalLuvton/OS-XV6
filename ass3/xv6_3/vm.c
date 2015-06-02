@@ -10,7 +10,7 @@
 extern char data[];  // defined by kernel.ld
 struct segdesc gdt[NSEGS];
 
-// forward definitions
+// forward decelerations
 static void removeAddressFromTLB(struct cpu *c, uint va);
 static void addAddressToTLB(struct cpu *c, uint va);
 
@@ -52,7 +52,7 @@ seginit(void)
 // Return the address of the PTE in page table pgdir
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page table pages.
-pte_t *
+static pte_t *
 walkpgdir(pde_t *pgdir, const void *va, int alloc)
 {
   pde_t *pde;
@@ -192,8 +192,8 @@ switchuvm(struct proc *p)
   ltr(SEG_TSS << 3);
   if(p->pgdir == 0)
     panic("switchuvm: no pgdir");
-  // simulated TLB
-  //lcr3(v2p(p->pgdir));  // switch to new address space
+    switchkvm(cpu);
+    // lcr3(v2p(p->pgdir));  // switch to new address space
   popcli();
 }
 
@@ -459,29 +459,27 @@ trappgflt(struct cpu* c, struct proc* p, struct trapframe* tf){
 			addAddressToTLB(c, (uint)va);
 			return;
 		}
-		else{
-			// the address is not mapped in the user pgdir. allocate a new page for it
-			if (p->sz < (uint)va){
-				// attempting to access address that is beyond the process' space
-				cprintf("address is larger then process space");
-				exit();
-			}
-
-			char * newPysicalAddress;
-			newPysicalAddress = kalloc();
-			if(newPysicalAddress == 0){
-			  cprintf("system ran out of free memory\n");
-			  exit();
-			}
-			
-			//cprintf("allocated lazy page\n");
-			memset(newPysicalAddress, 0, PGSIZE);
-			uint pg = PGROUNDDOWN((uint)va);
-			if (mappages(p->pgdir, (char*)pg, 1, v2p(newPysicalAddress), PTE_W | PTE_U) < 0){
-				panic("error when mapping a newly allocated page");
-			}
-			return;
+		// the address is not mapped in the user pgdir. allocate a new page for it
+		if (p->sz < (uint)va){
+			// attempting to access address that is beyond the process' space
+			cprintf("address is larger then process space");
+			exit();
 		}
+
+		char * newPysicalAddress;
+		newPysicalAddress = kalloc();
+		if(newPysicalAddress == 0){
+			cprintf("system ran out of free memory\n");
+			exit();
+		}
+		
+		//cprintf("allocated lazy page\n");
+		memset(newPysicalAddress, 0, PGSIZE);
+		uint pg = PGROUNDDOWN((uint)va);
+		if (mappages(p->pgdir, (char*)pg, 1, v2p(newPysicalAddress), PTE_W | PTE_U) < 0){
+			panic("error when mapping a newly allocated page");
+		}
+		return;
 	}
 	else{
 		// should never get here

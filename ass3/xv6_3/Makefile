@@ -173,6 +173,7 @@ UPROGS=\
 	_wc\
 	_zombie\
 	_play\
+	_task3tests\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)

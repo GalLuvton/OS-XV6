@@ -10,7 +10,8 @@ int
 procfsisdir(struct inode *ip) {
 	// minor 0 -> /proc
 	// minor 1 -> /proc/PID
-	// minor 2 -> /proc/PID/{somefile}
+	// minor 2 -> /proc/PID/fdinfo
+	// minor 3 -> /proc/PID/fdinfo/{somefile}
 	// in minor 2, some files are folders (fdinfo), and some are files
 	return (ip->minor == 0 || ip->minor == 1 || (ip->minor == 2 && ip->inum / 100 == 5));
 }

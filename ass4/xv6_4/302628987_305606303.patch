@@ -1,0 +1,526 @@
+diff --git a/Makefile b/Makefile
+index 4fd7e76..e6e7a14 100644
+--- a/Makefile
++++ b/Makefile
+@@ -16,6 +16,7 @@ OBJS = \
+ 	pipe.o\
+ 	proc.o\
+ 	procfs.o\
++	procfs_helpers.o\
+ 	spinlock.o\
+ 	string.o\
+ 	swtch.o\
+@@ -167,6 +168,7 @@ UPROGS=\
+ 	_ln\
+ 	_ls\
+ 	_mkdir\
++	_play\
+ 	_rm\
+ 	_sh\
+ 	_stressfs\
+diff --git a/exec.c b/exec.c
+index 8dbbdb6..6269922 100644
+--- a/exec.c
++++ b/exec.c
+@@ -5,6 +5,8 @@
+ #include "proc.h"
+ #include "defs.h"
+ #include "x86.h"
++#include "fs.h"
++#include "file.h"
+ #include "elf.h"
+ 
+ int
+@@ -26,6 +28,8 @@ exec(char *path, char **argv)
+   ilock(ip);
+   pgdir = 0;
+ 
++  proc->exe = idup(ip);
++
+   // Check ELF header
+   if(readi(ip, (char*)&elf, 0, sizeof(elf)) < sizeof(elf))
+     goto bad;
+@@ -69,7 +73,10 @@ exec(char *path, char **argv)
+     if(copyout(pgdir, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
+       goto bad;
+     ustack[3+argc] = sp;
++    strncpy(proc->argv[argc], argv[argc], strlen(argv[argc]) + 1);
+   }
++  proc->argc = argc;
++  strncpy(proc->path, path, strlen(path) + 1);
+   ustack[3+argc] = 0;
+ 
+   ustack[0] = 0xffffffff;  // fake return PC
+diff --git a/ls.c b/ls.c
+index b6ddd7f..2402ca9 100644
+--- a/ls.c
++++ b/ls.c
+@@ -47,6 +47,7 @@ ls(char *path)
+     break;
+   
+   case T_DIR:
++  case T_DEV:
+     if(strlen(path) + 1 + DIRSIZ + 1 > sizeof buf){
+       printf(1, "ls: path too long\n");
+       break;
+diff --git a/play.c b/play.c
+new file mode 100644
+index 0000000..1340214
+--- /dev/null
++++ b/play.c
+@@ -0,0 +1,22 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++#include "fcntl.h"
++
++int
++main(int argc, char *argv[])
++{	
++	printf(1, "main starting\n");
++	
++	// O_RDONLY | O_WRONLY | O_RDWR
++	int fd = open("hello.txt", O_RDONLY|O_CREATE);
++	
++	printf(1, "file created with fd %d\n", fd);
++	
++	for (;;);
++	
++	printf(1, "main exiting\n");
++	
++	exit();
++}
++
+diff --git a/proc.h b/proc.h
+index 3b9c3ac..77f5b37 100644
+--- a/proc.h
++++ b/proc.h
+@@ -65,6 +65,10 @@ struct proc {
+   int killed;                  // If non-zero, have been killed
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
++  char path[80];			   // The path where the process was created
++  char argv[MAXARG][80];	   // Array of arguments
++  int argc;					   // Argument count
++  struct inode *exe;		   // The inode pointing to the executable file
+   char name[16];               // Process name (debugging)
+ };
+ 
+diff --git a/procfs.c b/procfs.c
+index 23301b0..6b1423d 100644
+--- a/procfs.c
++++ b/procfs.c
+@@ -1,34 +1,199 @@
+-#include "types.h"
+-#include "stat.h"
+-#include "defs.h"
+-#include "param.h"
+-#include "traps.h"
+-#include "spinlock.h"
+-#include "fs.h"
+-#include "file.h"
+-#include "memlayout.h"
+-#include "mmu.h"
+-#include "proc.h"
+-#include "x86.h"
++#include "procfs_helpers.h"
++
++#define DE_SZ sizeof(struct dirent)
++#define BUFFER_SIZE DE_SZ*(NPROC+2)
++#define BASE_INUM 300
++
++uint procinum = -1;
+ 
+ int 
+ procfsisdir(struct inode *ip) {
+-  return 0;
++	// minor 0 -> /proc
++	// minor 1 -> /proc/PID
++	// minor 2 -> /proc/PID/fdinfo
++	// minor 3 -> /proc/PID/fdinfo/{somefile}
++	// in minor 2, some files are folders (fdinfo), and some are files
++	return (ip->minor == 0 || ip->minor == 1 || (ip->minor == 2 && ip->inum / 100 == 5));
++}
++
++// creates the /proc/PID/fdinfo folder info
++int
++createProcfFDsEntries(int inum, char *buf) {
++	int denum, i;
++	struct proc *p;	
++	struct dirent de;
++
++	de.inum = inum;
++	strncpy(de.name, ".", DIRSIZ);
++	memmove(buf, (char *)&de, DE_SZ);
++
++	de.inum = inum - 300;
++	strncpy(de.name, "..", DIRSIZ);
++	memmove(buf + DE_SZ, (char *)&de, DE_SZ);
++
++	denum = 2;
++
++	#if defined(TEST)
++	p = &ptable.proc[inum - 500];
++	#else
++	p = getProcByID(inum - 500);
++	#endif
++
++	for (i = 0; i < NOFILE; i++) {
++		if (p->ofile[i] == FD_NONE)
++			continue;
++		de.inum = inum * NOFILE + i;
++		itoa(i, de.name);
++		memmove(buf + DE_SZ * denum++, (char *)&de, DE_SZ);	
++	}
++
++	return DE_SZ * denum;
++}
++
++// creates the /proc folder info
++int
++createProcfsEntries(char *buf) {
++	int denum, i;
++	struct dirent de;
++	struct proc *p;
++
++	de.inum = procinum;
++	strncpy(de.name, ".", DIRSIZ);
++	memmove(buf, (char *)&de, DE_SZ);
++
++	de.inum = ROOTINO;
++	strncpy(de.name, "..", DIRSIZ);
++	memmove(buf + DE_SZ, (char *)&de, DE_SZ);
++
++	denum = 2;
++
++	for (i = 0; i < NPROC; i++) {
++		p = getProcByID(i);
++
++		if (p->state == UNUSED)
++			continue;
++
++		de.inum = 200 + i;
++		itoa(p->pid, de.name);
++		memmove(buf + DE_SZ * denum++, (char *)&de, DE_SZ);
++	}
++
++	return denum * DE_SZ;
++}
++
++// creates the /proc/PID folder info
++int
++createProcfsPerProcEntries(int inum, char *buf) {
++	struct proc *p;	
++	struct dirent de;
++
++	de.inum = inum;
++	strncpy(de.name, ".", DIRSIZ);
++	memmove(buf, (char *)&de, DE_SZ);
++
++	de.inum = procinum;
++	strncpy(de.name, "..", DIRSIZ);
++	memmove(buf + DE_SZ, (char *)&de, DE_SZ);
++
++	p = getProcByID(inum - 200);
++
++	if (p->state == UNUSED)
++		return DE_SZ * 2;
++
++	if (p->cwd) {
++		de.inum = p->cwd->inum;
++	strncpy(de.name, "cwd", DIRSIZ);
++	memmove(buf + DE_SZ * 2, (char *)&de, DE_SZ);	
++	}
++
++	if (p->exe)
++		de.inum = p->exe->inum;
++	strncpy(de.name, "exe", DIRSIZ);
++	memmove(buf + DE_SZ * 3, (char *)&de, DE_SZ);	
++
++	de.inum = 100 + inum;
++	strncpy(de.name, "cmdline", DIRSIZ);
++	memmove(buf + DE_SZ * 4, (char *)&de, DE_SZ);
++
++	de.inum = 200 + inum;
++	strncpy(de.name, "status", DIRSIZ);
++	memmove(buf + DE_SZ * 5, (char *)&de, DE_SZ);
++
++	de.inum = 300 + inum;
++	strncpy(de.name, "fdinfo", DIRSIZ);
++	memmove(buf + DE_SZ * 6, (char *)&de, DE_SZ);
++
++	return DE_SZ * 7;
+ }
+ 
+ void 
+ procfsiread(struct inode* dp, struct inode *ip) {
++	if (ip->inum < 200){
++		return;
++	}
++	ip->type = T_DEV;
++	ip->major = PROCFS;
++	if (dp->inum < ip->inum){
++		ip->minor =  dp->minor + 1;
++	} else {
++		ip->minor = dp->minor - 1;
++	}
++	ip->size = 0;
++	ip->nlink = 1;	
++    ip->flags = I_VALID;
+ }
+ 
++
+ int
+ procfsread(struct inode *ip, char *dst, int off, int n) {
+-  return 0;
++	int size = 0;
++	int temp;
++	char buf[BUFFER_SIZE];
++
++	switch(ip->minor) {
++	case 0:
++		procinum = ip->inum;
++		size = createProcfsEntries(buf);
++		break;
++	case 1:
++		size = createProcfsPerProcEntries(ip->inum, buf);
++		break;
++	case 2:
++		switch(ip->inum / 100) {
++			case 3:
++				size = addInfoAboutCMDLineToBuf(ip->inum, buf);
++				break;
++			case 4:
++				size = addInfoAboutStatusToBuf(ip->inum, buf);
++				break;
++			case 5:
++				size = createProcfFDsEntries(ip->inum, buf);
++				break;
++		}
++		break;
++	case 3:
++		if (ip->inum >= 500 * NOFILE && ip->inum < (501 + NPROC) * NOFILE) {
++			size = addInfoAboutFDToBuf(ip->inum, buf);
++		}
++		break;
++	}
++
++	if (off < size) {
++		temp = size - off;
++		if (n < temp){
++			temp = n;
++		} else {
++			temp = temp;
++		}
++		memmove(dst, buf + off, temp);
++		return temp;
++	}
++	return 0;
+ }
+ 
+ int
+-procfswrite(struct inode *ip, char *buf, int n)
+-{
+-  return 0;
++procfswrite(struct inode *ip, char *buf, int n) {
++	return 0;
+ }
+ 
+ void
+diff --git a/procfs_helpers.c b/procfs_helpers.c
+new file mode 100644
+index 0000000..778b58b
+--- /dev/null
++++ b/procfs_helpers.c
+@@ -0,0 +1,159 @@
++#include "procfs_helpers.h"
++
++
++extern struct {
++  struct spinlock lock;
++  struct proc proc[NPROC];
++} ptable;
++
++struct proc*
++getProcByID(int id)
++{
++	struct proc *p;
++	
++	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
++		if ((p->state != UNUSED) && (p->pid == id)){
++			break;
++		}
++	}
++	return p;
++}
++
++char*
++getProcState(struct proc *p)
++{
++	static char *states[] = {
++	[UNUSED]    "unused",
++	[EMBRYO]    "embryo",
++	[SLEEPING]  "sleep ",
++	[RUNNABLE]  "runble",
++	[RUNNING]   "run   ",
++	[ZOMBIE]    "zombie"
++	};
++
++	if(p->state >= 0 && p->state < NELEM(states) && states[p->state]){
++		return states[p->state];
++	}
++	return "undef ";
++}
++
++char*
++getTypeForFile(struct file *f)
++{
++	static char *fdNames[] = {
++	[FD_NONE]    "unused",
++	[FD_PIPE]    "pipe",
++	[FD_INODE]   "inode",
++	};
++
++	if(f->type >= 0 && f->type < NELEM(fdNames) && fdNames[f->type]){
++		return fdNames[f->type];
++	}
++	return "undef";
++}
++
++char*
++getReadFlagsForFile(struct file *f)
++{
++	if(f->readable == 0){
++		return "non-readable";
++	}
++	return "readable";
++}
++
++char*
++getWriteFlagsForFile(struct file *f)
++{
++	if(f->writable == 0){
++		return "non-writeable";
++	}
++	return "writeable";
++}
++
++void
++itoa(int x, char *buf)
++{
++	static char digits[] = "0123456789";
++	int i = 0;
++	char tmp;
++
++	do{
++		buf[i++] = digits[x % 10];
++	}while((x /= 10) != 0);
++	buf[i] = '\0';
++
++	for (i = 0; i < strlen(buf) / 2; i++) {
++		tmp = buf[i];
++		buf[i] = buf[strlen(buf) - i - 1];
++		buf[strlen(buf) - i - 1] = tmp;
++	}
++}
++
++int
++addInfoAboutFDToBuf(int inum, char *buf) {
++	struct proc *p;
++	int fd;
++	char* temp;
++
++	p = getProcByID(inum / NOFILE - 500);
++
++	fd = inum % NOFILE;
++
++	strncpy(buf, "Type- ", strlen("Type- ") + 1);
++	strncpy(buf + strlen(buf), getTypeForFile(p->ofile[fd]), strlen(getTypeForFile(p->ofile[fd])) + 1);
++	if (p->ofile[fd]->type == FD_INODE) {
++		strncpy(buf + strlen(buf), " (", strlen(" (") + 1);
++		itoa(p->ofile[fd]->ip->inum, buf + strlen(buf));
++		strncpy(buf + strlen(buf), ")", strlen(")") + 1);
++	}
++	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
++	strncpy(buf + strlen(buf), "Offset- ", strlen("Offset- ") + 1);
++	itoa(p->ofile[fd]->off, buf + strlen(buf));
++	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
++	strncpy(buf + strlen(buf), "Flags- ", strlen("Flags- ") + 1);
++	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
++	strncpy(buf + strlen(buf), "Read- ", strlen("Read- ") + 1);
++	temp = getReadFlagsForFile(p->ofile[fd]);
++	strncpy(buf + strlen(buf), temp, strlen(temp) + 1);
++	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
++	strncpy(buf + strlen(buf), "Write- ", strlen("Write- ") + 1);
++	temp = getWriteFlagsForFile(p->ofile[fd]);
++	strncpy(buf + strlen(buf), temp, strlen(temp) + 1);
++	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
++
++	return strlen(buf);	
++}
++
++int
++addInfoAboutCMDLineToBuf(int inum, char *buf) {
++	int i;
++	struct proc *p;
++
++	p = getProcByID(inum - 300);
++	
++	strncpy(buf, "Cmdline- ", strlen("Cmdline- ") + 1);
++	strncpy(buf + strlen(buf), p->path, strlen(p->path) + 1);
++	for (i = 0; i < p->argc; i++) {
++		strncpy(buf + strlen(buf), " ", strlen(" ") + 1);
++		strncpy(buf + strlen(buf), p->argv[i], strlen(p->argv[i]) + 1);
++	}
++	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
++	return strlen(buf);
++}
++
++int
++addInfoAboutStatusToBuf(int inum, char *buf) {	
++	struct proc *p;	
++	char b[100];
++
++	p = getProcByID(inum - 400);
++
++	strncpy(buf, "Status: ", strlen("Status: ") + 1);
++	strncpy(buf + strlen(buf), getProcState(p), strlen(getProcState(p)) + 1);	
++	strncpy(buf + strlen(buf), "\nSize: ", strlen("\nSize: ") + 1);
++	itoa(p->sz, b);
++	strncpy(buf + strlen(buf), b, strlen(b) + 1);
++	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
++
++	return strlen(buf);
++}
+diff --git a/procfs_helpers.h b/procfs_helpers.h
+new file mode 100644
+index 0000000..93e4675
+--- /dev/null
++++ b/procfs_helpers.h
+@@ -0,0 +1,26 @@
++#include "types.h"
++#include "stat.h"
++#include "defs.h"
++#include "param.h"
++#include "traps.h"
++#include "spinlock.h"
++#include "fs.h"
++#include "file.h"
++#include "memlayout.h"
++#include "mmu.h"
++#include "proc.h"
++#include "x86.h"
++
++struct proc* getProcByID(int id);
++
++void itoa(int x, char *buf);
++
++char* getProcState(struct proc *p);
++
++char* getTypeForFile(struct file *f);
++
++int addInfoAboutFDToBuf(int inum, char *buf);
++
++int addInfoAboutCMDLineToBuf(int inum, char *buf);
++
++int addInfoAboutStatusToBuf(int inum, char *buf);

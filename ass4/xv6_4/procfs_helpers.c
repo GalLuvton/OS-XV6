@@ -52,6 +52,24 @@ getTypeForFile(struct file *f)
 	return "undef";
 }
 
+char*
+getReadFlagsForFile(struct file *f)
+{
+	if(f->readable == 0){
+		return "non-readable";
+	}
+	return "readable";
+}
+
+char*
+getWriteFlagsForFile(struct file *f)
+{
+	if(f->writable == 0){
+		return "non-writeable";
+	}
+	return "writeable";
+}
+
 void
 itoa(int x, char *buf)
 {
@@ -75,6 +93,7 @@ int
 addInfoAboutFDToBuf(int inum, char *buf) {
 	struct proc *p;
 	int fd;
+	char* temp;
 
 	p = getProcByID(inum / NOFILE - 500);
 
@@ -91,6 +110,16 @@ addInfoAboutFDToBuf(int inum, char *buf) {
 	strncpy(buf + strlen(buf), "Offset- ", strlen("Offset- ") + 1);
 	itoa(p->ofile[fd]->off, buf + strlen(buf));
 	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
+	strncpy(buf + strlen(buf), "Flags- ", strlen("Flags- ") + 1);
+	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
+	strncpy(buf + strlen(buf), "Read- ", strlen("Read- ") + 1);
+	temp = getReadFlagsForFile(p->ofile[fd]);
+	strncpy(buf + strlen(buf), temp, strlen(temp) + 1);
+	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
+	strncpy(buf + strlen(buf), "Write- ", strlen("Write- ") + 1);
+	temp = getWriteFlagsForFile(p->ofile[fd]);
+	strncpy(buf + strlen(buf), temp, strlen(temp) + 1);
+	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
 
 	return strlen(buf);	
 }
@@ -102,7 +131,7 @@ addInfoAboutCMDLineToBuf(int inum, char *buf) {
 
 	p = getProcByID(inum - 300);
 	
-	strncpy(buf, "Path- ", strlen("Path- ") + 1);
+	strncpy(buf, "Cmdline- ", strlen("Cmdline- ") + 1);
 	strncpy(buf + strlen(buf), p->path, strlen(p->path) + 1);
 	for (i = 0; i < p->argc; i++) {
 		strncpy(buf + strlen(buf), " ", strlen(" ") + 1);

@@ -65,6 +65,10 @@ struct proc {
   int killed;                  // If non-zero, have been killed
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
+  char path[80];			   // The path where the process was created
+  char argv[MAXARG][80];	   // Array of arguments
+  int argc;					   // Argument count
+  struct inode *exe;		   // The inode pointing to the executable file
   char name[16];               // Process name (debugging)
 };
 

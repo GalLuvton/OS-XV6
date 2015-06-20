@@ -16,6 +16,7 @@ OBJS = \
 	pipe.o\
 	proc.o\
 	procfs.o\
+	procfs_helpers.o\
 	spinlock.o\
 	string.o\
 	swtch.o\
@@ -167,6 +168,7 @@ UPROGS=\
 	_ln\
 	_ls\
 	_mkdir\
+	_play\
 	_rm\
 	_sh\
 	_stressfs\

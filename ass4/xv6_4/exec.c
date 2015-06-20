@@ -5,6 +5,8 @@
 #include "proc.h"
 #include "defs.h"
 #include "x86.h"
+#include "fs.h"
+#include "file.h"
 #include "elf.h"
 
 int
@@ -25,6 +27,8 @@ exec(char *path, char **argv)
   }
   ilock(ip);
   pgdir = 0;
+
+  proc->exe = idup(ip);
 
   // Check ELF header
   if(readi(ip, (char*)&elf, 0, sizeof(elf)) < sizeof(elf))
@@ -69,7 +73,10 @@ exec(char *path, char **argv)
     if(copyout(pgdir, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
       goto bad;
     ustack[3+argc] = sp;
+    strncpy(proc->argv[argc], argv[argc], strlen(argv[argc]) + 1);
   }
+  proc->argc = argc;
+  strncpy(proc->path, path, strlen(path) + 1);
   ustack[3+argc] = 0;
 
   ustack[0] = 0xffffffff;  // fake return PC

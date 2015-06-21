@@ -11,6 +11,12 @@
 #include "proc.h"
 #include "x86.h"
 
+#define BASE_INUM 200
+#define CMDLINE_PREFIX 100
+#define STATUS_PREFIX 200
+#define FDINFO_PREFIX 300
+#define FD_ENTRIES_PREFIX 500
+
 struct proc* getProcByID(int id);
 
 void itoa(int x, char *buf);

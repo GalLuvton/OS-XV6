@@ -2,7 +2,6 @@
 
 #define DE_SZ sizeof(struct dirent)
 #define BUFFER_SIZE DE_SZ*(NPROC+2)
-#define BASE_INUM 300
 
 uint procinum = -1;
 
@@ -13,7 +12,7 @@ procfsisdir(struct inode *ip) {
 	// minor 2 -> /proc/PID/fdinfo
 	// minor 3 -> /proc/PID/fdinfo/{somefile}
 	// in minor 2, some files are folders (fdinfo), and some are files
-	return (ip->minor == 0 || ip->minor == 1 || (ip->minor == 2 && ip->inum / 100 == 5));
+	return (ip->minor == 0 || ip->minor == 1 || (ip->minor == 2 && (ip->inum/100) == (FD_ENTRIES_PREFIX/100)));
 }
 
 // creates the /proc/PID/fdinfo folder info
@@ -27,17 +26,13 @@ createProcfFDsEntries(int inum, char *buf) {
 	strncpy(de.name, ".", DIRSIZ);
 	memmove(buf, (char *)&de, DE_SZ);
 
-	de.inum = inum - 300;
+	de.inum = inum - FDINFO_PREFIX;
 	strncpy(de.name, "..", DIRSIZ);
 	memmove(buf + DE_SZ, (char *)&de, DE_SZ);
 
 	denum = 2;
 
-	#if defined(TEST)
-	p = &ptable.proc[inum - 500];
-	#else
-	p = getProcByID(inum - 500);
-	#endif
+	p = getProcByID(inum - FD_ENTRIES_PREFIX);
 
 	for (i = 0; i < NOFILE; i++) {
 		if (p->ofile[i] == FD_NONE)
@@ -73,7 +68,7 @@ createProcfsEntries(char *buf) {
 		if (p->state == UNUSED)
 			continue;
 
-		de.inum = 200 + i;
+		de.inum = BASE_INUM + i;
 		itoa(p->pid, de.name);
 		memmove(buf + DE_SZ * denum++, (char *)&de, DE_SZ);
 	}
@@ -86,49 +81,59 @@ int
 createProcfsPerProcEntries(int inum, char *buf) {
 	struct proc *p;	
 	struct dirent de;
+	int entryCount = 0;
 
 	de.inum = inum;
 	strncpy(de.name, ".", DIRSIZ);
-	memmove(buf, (char *)&de, DE_SZ);
+	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
+	entryCount++;
 
 	de.inum = procinum;
 	strncpy(de.name, "..", DIRSIZ);
-	memmove(buf + DE_SZ, (char *)&de, DE_SZ);
+	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
+	entryCount++;
 
-	p = getProcByID(inum - 200);
+	p = getProcByID(inum - BASE_INUM);
 
-	if (p->state == UNUSED)
-		return DE_SZ * 2;
+	if (p->state == UNUSED){
+		return DE_SZ*entryCount;
+	}
 
 	if (p->cwd) {
 		de.inum = p->cwd->inum;
-	strncpy(de.name, "cwd", DIRSIZ);
-	memmove(buf + DE_SZ * 2, (char *)&de, DE_SZ);	
+		strncpy(de.name, "cwd", DIRSIZ);
+		memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
+		entryCount++;
 	}
 
-	if (p->exe)
+	if (p->exe){
 		de.inum = p->exe->inum;
-	strncpy(de.name, "exe", DIRSIZ);
-	memmove(buf + DE_SZ * 3, (char *)&de, DE_SZ);	
+		strncpy(de.name, "exe", DIRSIZ);
+		memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
+		entryCount++;
+	}
 
-	de.inum = 100 + inum;
+	de.inum = CMDLINE_PREFIX + inum;
 	strncpy(de.name, "cmdline", DIRSIZ);
-	memmove(buf + DE_SZ * 4, (char *)&de, DE_SZ);
+	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
+	entryCount++;
 
-	de.inum = 200 + inum;
+	de.inum = STATUS_PREFIX + inum;
 	strncpy(de.name, "status", DIRSIZ);
-	memmove(buf + DE_SZ * 5, (char *)&de, DE_SZ);
+	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
+	entryCount++;
 
-	de.inum = 300 + inum;
+	de.inum = FDINFO_PREFIX + inum;
 	strncpy(de.name, "fdinfo", DIRSIZ);
-	memmove(buf + DE_SZ * 6, (char *)&de, DE_SZ);
+	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
+	entryCount++;
 
-	return DE_SZ * 7;
+	return DE_SZ*entryCount;
 }
 
 void 
 procfsiread(struct inode* dp, struct inode *ip) {
-	if (ip->inum < 200){
+	if (ip->inum < BASE_INUM){
 		return;
 	}
 	ip->type = T_DEV;
@@ -143,6 +148,36 @@ procfsiread(struct inode* dp, struct inode *ip) {
     ip->flags = I_VALID;
 }
 
+int
+createLevel1Dir(struct inode *ip, char *buff){
+	return createProcfsEntries(buff);
+}
+
+int
+createLevel2Dir(struct inode *ip, char *buff){
+	return createProcfsPerProcEntries(ip->inum, buff);
+}
+
+int
+createLevel3Dir(struct inode *ip, char *buff){
+	switch((ip->inum)/100) {
+		case ((CMDLINE_PREFIX+BASE_INUM)/100):
+			return addInfoAboutCMDLineToBuf(ip->inum, buff);
+		case ((STATUS_PREFIX+BASE_INUM)/100):
+			return addInfoAboutStatusToBuf(ip->inum, buff);
+		case ((FDINFO_PREFIX+BASE_INUM)/100):
+			return createProcfFDsEntries(ip->inum, buff);
+	}
+	return 0;
+}
+
+int
+createLevel4Dir(struct inode *ip, char *buff){
+	if (ip->inum >= (NOFILE*FD_ENTRIES_PREFIX) && ip->inum < ((NPROC+501)*NOFILE)) {
+		return addInfoAboutFDToBuf(ip->inum, buff);
+	}
+	return 0;
+}
 
 int
 procfsread(struct inode *ip, char *dst, int off, int n) {
@@ -150,40 +185,29 @@ procfsread(struct inode *ip, char *dst, int off, int n) {
 	int temp;
 	char buf[BUFFER_SIZE];
 
+	// inode depth
 	switch(ip->minor) {
-	case 0:
-		procinum = ip->inum;
-		size = createProcfsEntries(buf);
-		break;
-	case 1:
-		size = createProcfsPerProcEntries(ip->inum, buf);
-		break;
-	case 2:
-		switch(ip->inum / 100) {
-			case 3:
-				size = addInfoAboutCMDLineToBuf(ip->inum, buf);
-				break;
-			case 4:
-				size = addInfoAboutStatusToBuf(ip->inum, buf);
-				break;
-			case 5:
-				size = createProcfFDsEntries(ip->inum, buf);
-				break;
-		}
-		break;
-	case 3:
-		if (ip->inum >= 500 * NOFILE && ip->inum < (501 + NPROC) * NOFILE) {
-			size = addInfoAboutFDToBuf(ip->inum, buf);
-		}
-		break;
+		case 0:
+			procinum = ip->inum;
+			size = createLevel1Dir(ip, buf);
+			break;
+		case 1:
+			size = createLevel2Dir(ip, buf);
+			break;
+		case 2:
+			size = createLevel3Dir(ip, buf);
+			break;
+		case 3:
+			size = createLevel4Dir(ip, buf);
+			break;
+		default:
+			break;
 	}
 
 	if (off < size) {
 		temp = size - off;
 		if (n < temp){
 			temp = n;
-		} else {
-			temp = temp;
 		}
 		memmove(dst, buf + off, temp);
 		return temp;

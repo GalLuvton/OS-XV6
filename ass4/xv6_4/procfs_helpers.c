@@ -95,7 +95,7 @@ addInfoAboutFDToBuf(int inum, char *buf) {
 	int fd;
 	char* temp;
 
-	p = getProcByID(inum / NOFILE - 500);
+	p = getProcByID(inum / NOFILE - (FDINFO_PREFIX+BASE_INUM));
 
 	fd = inum % NOFILE;
 
@@ -129,13 +129,18 @@ addInfoAboutCMDLineToBuf(int inum, char *buf) {
 	int i;
 	struct proc *p;
 
-	p = getProcByID(inum - 300);
+	p = getProcByID(inum - (CMDLINE_PREFIX+BASE_INUM));
 	
 	strncpy(buf, "Cmdline- ", strlen("Cmdline- ") + 1);
+	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
+	strncpy(buf + strlen(buf), "Path- ", strlen("Path- ") + 1);
 	strncpy(buf + strlen(buf), p->path, strlen(p->path) + 1);
+	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
+	strncpy(buf + strlen(buf), "Args- ", strlen("Args- ") + 1);
+
 	for (i = 0; i < p->argc; i++) {
-		strncpy(buf + strlen(buf), " ", strlen(" ") + 1);
 		strncpy(buf + strlen(buf), p->argv[i], strlen(p->argv[i]) + 1);
+		strncpy(buf + strlen(buf), " ", strlen(" ") + 1);
 	}
 	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
 	return strlen(buf);
@@ -146,7 +151,7 @@ addInfoAboutStatusToBuf(int inum, char *buf) {
 	struct proc *p;	
 	char b[100];
 
-	p = getProcByID(inum - 400);
+	p = getProcByID(inum - (STATUS_PREFIX+BASE_INUM));
 
 	strncpy(buf, "Status: ", strlen("Status: ") + 1);
 	strncpy(buf + strlen(buf), getProcState(p), strlen(getProcState(p)) + 1);	

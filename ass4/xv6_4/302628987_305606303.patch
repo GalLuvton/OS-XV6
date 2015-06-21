@@ -107,10 +107,10 @@ index 3b9c3ac..77f5b37 100644
  };
  
 diff --git a/procfs.c b/procfs.c
-index 23301b0..6b1423d 100644
+index 23301b0..cb10315 100644
 --- a/procfs.c
 +++ b/procfs.c
-@@ -1,34 +1,199 @@
+@@ -1,34 +1,223 @@
 -#include "types.h"
 -#include "stat.h"
 -#include "defs.h"
@@ -127,7 +127,6 @@ index 23301b0..6b1423d 100644
 +
 +#define DE_SZ sizeof(struct dirent)
 +#define BUFFER_SIZE DE_SZ*(NPROC+2)
-+#define BASE_INUM 300
 +
 +uint procinum = -1;
  
@@ -139,7 +138,7 @@ index 23301b0..6b1423d 100644
 +	// minor 2 -> /proc/PID/fdinfo
 +	// minor 3 -> /proc/PID/fdinfo/{somefile}
 +	// in minor 2, some files are folders (fdinfo), and some are files
-+	return (ip->minor == 0 || ip->minor == 1 || (ip->minor == 2 && ip->inum / 100 == 5));
++	return (ip->minor == 0 || ip->minor == 1 || (ip->minor == 2 && (ip->inum/100) == (FD_ENTRIES_PREFIX/100)));
 +}
 +
 +// creates the /proc/PID/fdinfo folder info
@@ -153,17 +152,13 @@ index 23301b0..6b1423d 100644
 +	strncpy(de.name, ".", DIRSIZ);
 +	memmove(buf, (char *)&de, DE_SZ);
 +
-+	de.inum = inum - 300;
++	de.inum = inum - FDINFO_PREFIX;
 +	strncpy(de.name, "..", DIRSIZ);
 +	memmove(buf + DE_SZ, (char *)&de, DE_SZ);
 +
 +	denum = 2;
 +
-+	#if defined(TEST)
-+	p = &ptable.proc[inum - 500];
-+	#else
-+	p = getProcByID(inum - 500);
-+	#endif
++	p = getProcByID(inum - FD_ENTRIES_PREFIX);
 +
 +	for (i = 0; i < NOFILE; i++) {
 +		if (p->ofile[i] == FD_NONE)
@@ -199,7 +194,7 @@ index 23301b0..6b1423d 100644
 +		if (p->state == UNUSED)
 +			continue;
 +
-+		de.inum = 200 + i;
++		de.inum = BASE_INUM + i;
 +		itoa(p->pid, de.name);
 +		memmove(buf + DE_SZ * denum++, (char *)&de, DE_SZ);
 +	}
@@ -212,49 +207,59 @@ index 23301b0..6b1423d 100644
 +createProcfsPerProcEntries(int inum, char *buf) {
 +	struct proc *p;	
 +	struct dirent de;
++	int entryCount = 0;
 +
 +	de.inum = inum;
 +	strncpy(de.name, ".", DIRSIZ);
-+	memmove(buf, (char *)&de, DE_SZ);
++	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
++	entryCount++;
 +
 +	de.inum = procinum;
 +	strncpy(de.name, "..", DIRSIZ);
-+	memmove(buf + DE_SZ, (char *)&de, DE_SZ);
++	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
++	entryCount++;
 +
-+	p = getProcByID(inum - 200);
++	p = getProcByID(inum - BASE_INUM);
 +
-+	if (p->state == UNUSED)
-+		return DE_SZ * 2;
++	if (p->state == UNUSED){
++		return DE_SZ*entryCount;
++	}
 +
 +	if (p->cwd) {
 +		de.inum = p->cwd->inum;
-+	strncpy(de.name, "cwd", DIRSIZ);
-+	memmove(buf + DE_SZ * 2, (char *)&de, DE_SZ);	
++		strncpy(de.name, "cwd", DIRSIZ);
++		memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
++		entryCount++;
 +	}
 +
-+	if (p->exe)
++	if (p->exe){
 +		de.inum = p->exe->inum;
-+	strncpy(de.name, "exe", DIRSIZ);
-+	memmove(buf + DE_SZ * 3, (char *)&de, DE_SZ);	
++		strncpy(de.name, "exe", DIRSIZ);
++		memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
++		entryCount++;
++	}
 +
-+	de.inum = 100 + inum;
++	de.inum = CMDLINE_PREFIX + inum;
 +	strncpy(de.name, "cmdline", DIRSIZ);
-+	memmove(buf + DE_SZ * 4, (char *)&de, DE_SZ);
++	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
++	entryCount++;
 +
-+	de.inum = 200 + inum;
++	de.inum = STATUS_PREFIX + inum;
 +	strncpy(de.name, "status", DIRSIZ);
-+	memmove(buf + DE_SZ * 5, (char *)&de, DE_SZ);
++	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
++	entryCount++;
 +
-+	de.inum = 300 + inum;
++	de.inum = FDINFO_PREFIX + inum;
 +	strncpy(de.name, "fdinfo", DIRSIZ);
-+	memmove(buf + DE_SZ * 6, (char *)&de, DE_SZ);
++	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
++	entryCount++;
 +
-+	return DE_SZ * 7;
++	return DE_SZ*entryCount;
  }
  
  void 
  procfsiread(struct inode* dp, struct inode *ip) {
-+	if (ip->inum < 200){
++	if (ip->inum < BASE_INUM){
 +		return;
 +	}
 +	ip->type = T_DEV;
@@ -267,9 +272,39 @@ index 23301b0..6b1423d 100644
 +	ip->size = 0;
 +	ip->nlink = 1;	
 +    ip->flags = I_VALID;
++}
++
++int
++createLevel1Dir(struct inode *ip, char *buff){
++	return createProcfsEntries(buff);
++}
++
++int
++createLevel2Dir(struct inode *ip, char *buff){
++	return createProcfsPerProcEntries(ip->inum, buff);
++}
++
++int
++createLevel3Dir(struct inode *ip, char *buff){
++	switch((ip->inum)/100) {
++		case ((CMDLINE_PREFIX+BASE_INUM)/100):
++			return addInfoAboutCMDLineToBuf(ip->inum, buff);
++		case ((STATUS_PREFIX+BASE_INUM)/100):
++			return addInfoAboutStatusToBuf(ip->inum, buff);
++		case ((FDINFO_PREFIX+BASE_INUM)/100):
++			return createProcfFDsEntries(ip->inum, buff);
++	}
++	return 0;
++}
++
++int
++createLevel4Dir(struct inode *ip, char *buff){
++	if (ip->inum >= (NOFILE*FD_ENTRIES_PREFIX) && ip->inum < ((NPROC+501)*NOFILE)) {
++		return addInfoAboutFDToBuf(ip->inum, buff);
++	}
++	return 0;
  }
  
-+
  int
  procfsread(struct inode *ip, char *dst, int off, int n) {
 -  return 0;
@@ -277,40 +312,29 @@ index 23301b0..6b1423d 100644
 +	int temp;
 +	char buf[BUFFER_SIZE];
 +
++	// inode depth
 +	switch(ip->minor) {
-+	case 0:
-+		procinum = ip->inum;
-+		size = createProcfsEntries(buf);
-+		break;
-+	case 1:
-+		size = createProcfsPerProcEntries(ip->inum, buf);
-+		break;
-+	case 2:
-+		switch(ip->inum / 100) {
-+			case 3:
-+				size = addInfoAboutCMDLineToBuf(ip->inum, buf);
-+				break;
-+			case 4:
-+				size = addInfoAboutStatusToBuf(ip->inum, buf);
-+				break;
-+			case 5:
-+				size = createProcfFDsEntries(ip->inum, buf);
-+				break;
-+		}
-+		break;
-+	case 3:
-+		if (ip->inum >= 500 * NOFILE && ip->inum < (501 + NPROC) * NOFILE) {
-+			size = addInfoAboutFDToBuf(ip->inum, buf);
-+		}
-+		break;
++		case 0:
++			procinum = ip->inum;
++			size = createLevel1Dir(ip, buf);
++			break;
++		case 1:
++			size = createLevel2Dir(ip, buf);
++			break;
++		case 2:
++			size = createLevel3Dir(ip, buf);
++			break;
++		case 3:
++			size = createLevel4Dir(ip, buf);
++			break;
++		default:
++			break;
 +	}
 +
 +	if (off < size) {
 +		temp = size - off;
 +		if (n < temp){
 +			temp = n;
-+		} else {
-+			temp = temp;
 +		}
 +		memmove(dst, buf + off, temp);
 +		return temp;
@@ -329,10 +353,10 @@ index 23301b0..6b1423d 100644
  void
 diff --git a/procfs_helpers.c b/procfs_helpers.c
 new file mode 100644
-index 0000000..778b58b
+index 0000000..1479946
 --- /dev/null
 +++ b/procfs_helpers.c
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,164 @@
 +#include "procfs_helpers.h"
 +
 +
@@ -430,7 +454,7 @@ index 0000000..778b58b
 +	int fd;
 +	char* temp;
 +
-+	p = getProcByID(inum / NOFILE - 500);
++	p = getProcByID(inum / NOFILE - (FDINFO_PREFIX+BASE_INUM));
 +
 +	fd = inum % NOFILE;
 +
@@ -464,13 +488,18 @@ index 0000000..778b58b
 +	int i;
 +	struct proc *p;
 +
-+	p = getProcByID(inum - 300);
++	p = getProcByID(inum - (CMDLINE_PREFIX+BASE_INUM));
 +	
 +	strncpy(buf, "Cmdline- ", strlen("Cmdline- ") + 1);
++	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
++	strncpy(buf + strlen(buf), "Path- ", strlen("Path- ") + 1);
 +	strncpy(buf + strlen(buf), p->path, strlen(p->path) + 1);
++	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
++	strncpy(buf + strlen(buf), "Args- ", strlen("Args- ") + 1);
++
 +	for (i = 0; i < p->argc; i++) {
-+		strncpy(buf + strlen(buf), " ", strlen(" ") + 1);
 +		strncpy(buf + strlen(buf), p->argv[i], strlen(p->argv[i]) + 1);
++		strncpy(buf + strlen(buf), " ", strlen(" ") + 1);
 +	}
 +	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
 +	return strlen(buf);
@@ -481,7 +510,7 @@ index 0000000..778b58b
 +	struct proc *p;	
 +	char b[100];
 +
-+	p = getProcByID(inum - 400);
++	p = getProcByID(inum - (STATUS_PREFIX+BASE_INUM));
 +
 +	strncpy(buf, "Status: ", strlen("Status: ") + 1);
 +	strncpy(buf + strlen(buf), getProcState(p), strlen(getProcState(p)) + 1);	
@@ -494,10 +523,10 @@ index 0000000..778b58b
 +}
 diff --git a/procfs_helpers.h b/procfs_helpers.h
 new file mode 100644
-index 0000000..93e4675
+index 0000000..67e39c6
 --- /dev/null
 +++ b/procfs_helpers.h
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,32 @@
 +#include "types.h"
 +#include "stat.h"
 +#include "defs.h"
@@ -510,6 +539,12 @@ index 0000000..93e4675
 +#include "mmu.h"
 +#include "proc.h"
 +#include "x86.h"
++
++#define BASE_INUM 200
++#define CMDLINE_PREFIX 100
++#define STATUS_PREFIX 200
++#define FDINFO_PREFIX 300
++#define FD_ENTRIES_PREFIX 500
 +
 +struct proc* getProcByID(int id);
 +

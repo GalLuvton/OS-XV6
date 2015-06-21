@@ -32,7 +32,7 @@ createProcfFDsEntries(int inum, char *buf) {
 
 	denum = 2;
 
-	p = getProcByID(inum - FD_ENTRIES_PREFIX);
+	p = getProcByPtableLoc(inum - FD_ENTRIES_PREFIX);
 
 	for (i = 0; i < NOFILE; i++) {
 		if (p->ofile[i] == FD_NONE)
@@ -63,7 +63,7 @@ createProcfsEntries(char *buf) {
 	denum = 2;
 
 	for (i = 0; i < NPROC; i++) {
-		p = getProcByID(i);
+		p = getProcByPtableLoc(i);
 
 		if (p->state == UNUSED)
 			continue;
@@ -93,7 +93,7 @@ createProcfsPerProcEntries(int inum, char *buf) {
 	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
 	entryCount++;
 
-	p = getProcByID(inum - BASE_INUM);
+	p = getProcByPtableLoc(inum - BASE_INUM);
 
 	if (p->state == UNUSED){
 		return DE_SZ*entryCount;

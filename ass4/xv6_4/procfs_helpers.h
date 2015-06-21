@@ -17,7 +17,7 @@
 #define FDINFO_PREFIX 300
 #define FD_ENTRIES_PREFIX 500
 
-struct proc* getProcByID(int id);
+struct proc* getProcByPtableLoc(int id);
 
 void itoa(int x, char *buf);
 

@@ -107,7 +107,7 @@ index 3b9c3ac..77f5b37 100644
  };
  
 diff --git a/procfs.c b/procfs.c
-index 23301b0..cb10315 100644
+index 23301b0..353091e 100644
 --- a/procfs.c
 +++ b/procfs.c
 @@ -1,34 +1,223 @@
@@ -158,7 +158,7 @@ index 23301b0..cb10315 100644
 +
 +	denum = 2;
 +
-+	p = getProcByID(inum - FD_ENTRIES_PREFIX);
++	p = getProcByPtableLoc(inum - FD_ENTRIES_PREFIX);
 +
 +	for (i = 0; i < NOFILE; i++) {
 +		if (p->ofile[i] == FD_NONE)
@@ -189,7 +189,7 @@ index 23301b0..cb10315 100644
 +	denum = 2;
 +
 +	for (i = 0; i < NPROC; i++) {
-+		p = getProcByID(i);
++		p = getProcByPtableLoc(i);
 +
 +		if (p->state == UNUSED)
 +			continue;
@@ -219,7 +219,7 @@ index 23301b0..cb10315 100644
 +	memmove(buf + DE_SZ*entryCount, (char *)&de, DE_SZ);
 +	entryCount++;
 +
-+	p = getProcByID(inum - BASE_INUM);
++	p = getProcByPtableLoc(inum - BASE_INUM);
 +
 +	if (p->state == UNUSED){
 +		return DE_SZ*entryCount;
@@ -353,10 +353,10 @@ index 23301b0..cb10315 100644
  void
 diff --git a/procfs_helpers.c b/procfs_helpers.c
 new file mode 100644
-index 0000000..1479946
+index 0000000..44cbf8e
 --- /dev/null
 +++ b/procfs_helpers.c
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,157 @@
 +#include "procfs_helpers.h"
 +
 +
@@ -366,16 +366,9 @@ index 0000000..1479946
 +} ptable;
 +
 +struct proc*
-+getProcByID(int id)
++getProcByPtableLoc(int id)
 +{
-+	struct proc *p;
-+	
-+	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-+		if ((p->state != UNUSED) && (p->pid == id)){
-+			break;
-+		}
-+	}
-+	return p;
++	return &ptable.proc[id];
 +}
 +
 +char*
@@ -454,7 +447,7 @@ index 0000000..1479946
 +	int fd;
 +	char* temp;
 +
-+	p = getProcByID(inum / NOFILE - (FDINFO_PREFIX+BASE_INUM));
++	p = getProcByPtableLoc(inum / NOFILE - (FDINFO_PREFIX+BASE_INUM));
 +
 +	fd = inum % NOFILE;
 +
@@ -488,7 +481,7 @@ index 0000000..1479946
 +	int i;
 +	struct proc *p;
 +
-+	p = getProcByID(inum - (CMDLINE_PREFIX+BASE_INUM));
++	p = getProcByPtableLoc(inum - (CMDLINE_PREFIX+BASE_INUM));
 +	
 +	strncpy(buf, "Cmdline- ", strlen("Cmdline- ") + 1);
 +	strncpy(buf + strlen(buf), "\n", strlen("\n") + 1);
@@ -510,7 +503,7 @@ index 0000000..1479946
 +	struct proc *p;	
 +	char b[100];
 +
-+	p = getProcByID(inum - (STATUS_PREFIX+BASE_INUM));
++	p = getProcByPtableLoc(inum - (STATUS_PREFIX+BASE_INUM));
 +
 +	strncpy(buf, "Status: ", strlen("Status: ") + 1);
 +	strncpy(buf + strlen(buf), getProcState(p), strlen(getProcState(p)) + 1);	
@@ -523,7 +516,7 @@ index 0000000..1479946
 +}
 diff --git a/procfs_helpers.h b/procfs_helpers.h
 new file mode 100644
-index 0000000..67e39c6
+index 0000000..3a9d3fd
 --- /dev/null
 +++ b/procfs_helpers.h
 @@ -0,0 +1,32 @@
@@ -546,7 +539,7 @@ index 0000000..67e39c6
 +#define FDINFO_PREFIX 300
 +#define FD_ENTRIES_PREFIX 500
 +
-+struct proc* getProcByID(int id);
++struct proc* getProcByPtableLoc(int id);
 +
 +void itoa(int x, char *buf);
 +
